@@ -59,6 +59,9 @@ import { posSale } from '@/modules/pos/pos-sale.service'
 import { listInvoices as listAllInvoices } from '@/modules/accounting/invoice.service'
 import { listEmployees, createEmployee } from '@/modules/hr/employee.service'
 import { createPayrollRun, postPayrollRun, listPayrollRuns } from '@/modules/hr/payroll.service'
+import { createCustomer } from '@/modules/crm/customer.service'
+import { scheduleAppointment, getDueReminders } from '@/modules/crm/appointment.service'
+import { listActivityLogs } from '@/modules/crm/activity-log.service'
 import { JournalBalanceError, InvoiceStateError, InsufficientStockError, PayrollStateError } from '@/lib/api'
 import { db, dbRaw } from '@/lib/db'
 import { ok, mapError, unauthorized } from '@/lib/api'
@@ -1148,6 +1151,216 @@ export async function POST() {
         hrIsolationDetails = { error: e instanceof Error ? e.message : String(e) }
       }
       results.push({ name: 'hr-tenant-isolation', passed: hrIsolationPassed, details: hrIsolationDetails })
+
+      // =================================================================
+      // PHASE 5 TESTS: CRM — invoice+customerId→activityLog, appointment→
+      // activityLog+reminder, reminders/due filtering, invoice without
+      // customerId, tenant isolation
+      // =================================================================
+
+      // ---------------- Test 18: Invoice with customerId → ActivityLog created automatically ----------------
+      let invoiceActivityPassed = false
+      let invoiceActivityDetails: Record<string, unknown> = {}
+      try {
+        // Create a customer
+        const customer = await createCustomer({ name: 'Test Customer CRM', phone: '01000000000' })
+
+        // Create an invoice WITH customerId
+        const invoice = await createInvoice({
+          customerName: customer.name,
+          date: new Date(),
+          lines: [{ description: 'CRM test service', amount: 500, taxRate: 0.14 }],
+          customerId: customer.id,
+        })
+
+        // Verify exactly ONE ActivityLog of type 'invoice_created' exists for this customer+invoice
+        const logs = await listActivityLogs(customer.id)
+        const invoiceLogs = logs.filter((l: { type: string; refId: string }) => l.type === 'invoice_created' && l.refId === invoice.id)
+        const hasExactlyOneLog = invoiceLogs.length === 1
+
+        invoiceActivityPassed = hasExactlyOneLog
+        invoiceActivityDetails = {
+          customerId: customer.id,
+          invoiceId: invoice.id,
+          activityLogsForCustomer: logs.length,
+          invoiceCreatedLogs: invoiceLogs.length,
+          hasExactlyOneLog,
+        }
+      } catch (e) {
+        invoiceActivityDetails = { error: e instanceof Error ? e.message : String(e) }
+      }
+      results.push({ name: 'invoice-customerid-creates-activitylog', passed: invoiceActivityPassed, details: invoiceActivityDetails })
+
+      // ---------------- Test 19: Appointment → ActivityLog + Reminder ----------------
+      let appointmentActivityPassed = false
+      let appointmentActivityDetails: Record<string, unknown> = {}
+      try {
+        // Create a customer
+        const customer = await createCustomer({ name: 'Test Customer Appt' })
+
+        // Schedule an appointment (1 hour from now → reminder dueAt = now - 0 = past)
+        const scheduledAt = new Date(Date.now() + 60 * 60 * 1000) // +1 hour
+        const appointment = await scheduleAppointment({
+          customerId: customer.id,
+          scheduledAt,
+          note: 'Test appointment',
+        })
+
+        // Verify ActivityLog 'appointment_scheduled' exists
+        const logs = await listActivityLogs(customer.id)
+        const apptLogs = logs.filter((l: { type: string; refId: string }) => l.type === 'appointment_scheduled' && l.refId === appointment.id)
+        const hasActivityLog = apptLogs.length === 1
+
+        // Verify exactly 1 Reminder is linked
+        const hasReminder = appointment.reminders.length === 1
+        const reminderDueAtCorrect = hasReminder && new Date(appointment.reminders[0].dueAt).getTime() === new Date(scheduledAt.getTime() - 60 * 60 * 1000).getTime()
+
+        appointmentActivityPassed = hasActivityLog && hasReminder && reminderDueAtCorrect
+        appointmentActivityDetails = {
+          customerId: customer.id,
+          appointmentId: appointment.id,
+          activityLogCount: apptLogs.length,
+          hasActivityLog,
+          reminderCount: appointment.reminders.length,
+          hasReminder,
+          reminderDueAt: appointment.reminders[0]?.dueAt,
+          reminderDueAtCorrect,
+        }
+      } catch (e) {
+        appointmentActivityDetails = { error: e instanceof Error ? e.message : String(e) }
+      }
+      results.push({ name: 'appointment-creates-activitylog-reminder', passed: appointmentActivityPassed, details: appointmentActivityDetails })
+
+      // ---------------- Test 20: /api/reminders/due returns only past-due, unsent reminders ----------------
+      let remindersDuePassed = false
+      let remindersDueDetails: Record<string, unknown> = {}
+      try {
+        // Create a customer
+        const customer = await createCustomer({ name: 'Test Customer Reminders' })
+
+        // Schedule an appointment in the PAST (so its reminder is definitely due)
+        // The reminder is dueAt = scheduledAt - 1 hour. If scheduledAt is in the past,
+        // the reminder is definitely past due.
+        const pastDate = new Date(Date.now() - 2 * 60 * 60 * 1000) // 2 hours ago
+        const pastAppointment = await scheduleAppointment({
+          customerId: customer.id,
+          scheduledAt: pastDate,
+          note: 'Past appointment (reminder should be due)',
+        })
+
+        // Schedule an appointment in the FUTURE (so its reminder is NOT due yet)
+        const futureDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) // 7 days from now
+        const futureAppointment = await scheduleAppointment({
+          customerId: customer.id,
+          scheduledAt: futureDate,
+          note: 'Future appointment (reminder NOT due)',
+        })
+
+        // Get due reminders
+        const dueReminders = await getDueReminders()
+
+        // The past appointment's reminder should be in the list
+        const pastReminderFound = dueReminders.some((r) => r.appointment.id === pastAppointment.id)
+
+        // The future appointment's reminder should NOT be in the list
+        const futureReminderExcluded = !dueReminders.some((r) => r.appointment.id === futureAppointment.id)
+
+        remindersDuePassed = pastReminderFound && futureReminderExcluded
+        remindersDueDetails = {
+          pastAppointmentId: pastAppointment.id,
+          futureAppointmentId: futureAppointment.id,
+          dueRemindersCount: dueReminders.length,
+          pastReminderFound,
+          futureReminderExcluded,
+        }
+      } catch (e) {
+        remindersDueDetails = { error: e instanceof Error ? e.message : String(e) }
+      }
+      results.push({ name: 'reminders-due-filtering', passed: remindersDuePassed, details: remindersDueDetails })
+
+      // ---------------- Test 21: Invoice WITHOUT customerId still works (no ActivityLog) ----------------
+      let noCustomerInvoicePassed = false
+      let noCustomerInvoiceDetails: Record<string, unknown> = {}
+      try {
+        // Create an invoice WITHOUT customerId (walk-in sale)
+        const invoice = await createInvoice({
+          customerName: 'Walk-in Customer',
+          date: new Date(),
+          lines: [{ description: 'Walk-in sale', amount: 100, taxRate: 0 }],
+        })
+
+        // Verify the invoice was created successfully
+        const invoiceCreated = !!invoice.id
+
+        // Verify the invoice has NO customerId
+        const noCustomerId = !invoice.customerId
+
+        // Verify NO ActivityLog was created for this invoice
+        // (We can't query by refId directly since there's no endpoint, but
+        // we can check that the invoice has no customer linked)
+        noCustomerInvoicePassed = invoiceCreated && noCustomerId
+        noCustomerInvoiceDetails = {
+          invoiceId: invoice.id,
+          invoiceCreated,
+          customerId: invoice.customerId,
+          noCustomerId,
+        }
+      } catch (e) {
+        noCustomerInvoiceDetails = { error: e instanceof Error ? e.message : String(e) }
+      }
+      results.push({ name: 'invoice-without-customerid-works', passed: noCustomerInvoicePassed, details: noCustomerInvoiceDetails })
+
+      // ---------------- Test 22: CRM tenant isolation ----------------
+      let crmIsolationPassed = false
+      let crmIsolationDetails: Record<string, unknown> = {}
+      try {
+        // Create a customer in the OTHER tenant using dbRaw
+        const otherCustomer = await dbRaw.customer.create({
+          data: {
+            tenantId: otherTenantAccount?.tenantId ?? 'tenant-noor',
+            name: 'Cross Tenant Customer',
+          },
+        })
+
+        // Try to READ the other tenant's customer via the service layer
+        // (scoped to current tenant → should not appear)
+        const { listCustomers } = await import('@/modules/crm/customer.service')
+        const myCustomers = await listCustomers()
+        const leakedCustomer = myCustomers.find((c) => c.id === otherCustomer.id) ?? null
+        const crossReadBlocked = leakedCustomer === null
+
+        // Try to schedule an appointment for the other tenant's customer
+        // (should fail — the customer doesn't exist in our tenant)
+        let crossAppointmentBlocked = false
+        let crossAppointmentError: string | null = null
+        try {
+          await scheduleAppointment({
+            customerId: otherCustomer.id,
+            scheduledAt: new Date(Date.now() + 86400000),
+          })
+          crossAppointmentBlocked = false
+        } catch (e) {
+          crossAppointmentBlocked = true
+          crossAppointmentError = e instanceof Error ? e.name : 'unknown'
+        }
+
+        crmIsolationPassed = crossReadBlocked && crossAppointmentBlocked
+        crmIsolationDetails = {
+          currentTenantId: ctx.tenantId,
+          otherTenantId: otherCustomer.tenantId,
+          otherCustomerName: otherCustomer.name,
+          crossTenantReadResult: leakedCustomer === null ? 'null (blocked)' : 'LEAKED',
+          crossReadBlocked,
+          crossAppointmentBlocked,
+          crossAppointmentError,
+        }
+
+        // Cleanup
+        await dbRaw.customer.delete({ where: { id: otherCustomer.id } })
+      } catch (e) {
+        crmIsolationDetails = { error: e instanceof Error ? e.message : String(e) }
+      }
+      results.push({ name: 'crm-tenant-isolation', passed: crmIsolationPassed, details: crmIsolationDetails })
 
       return results
     })

@@ -132,3 +132,16 @@ export const createPayrollRunSchema = z.object({
     .max(10)
     .regex(/^\d{4}-\d{2}$/, 'period must be YYYY-MM format'),
 })
+
+// ---------------- CRM (Phase 5) ----------------
+export const createCustomerSchema = z.object({
+  name: z.string().min(1).max(200),
+  phone: z.string().max(50).optional(),
+  email: z.string().email().max(200).optional(),
+})
+
+export const scheduleAppointmentSchema = z.object({
+  customerId: z.string().min(1),
+  scheduledAt: z.string().datetime(),
+  note: z.string().max(500).optional(),
+})

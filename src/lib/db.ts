@@ -121,6 +121,10 @@ function getScopedClient(tenantId: string): PrismaClient {
       // Phase 4: HR models with tenantId
       employee: { $allOperations: makeScopedHandler('employee', tenantId) },
       payrollRun: { $allOperations: makeScopedHandler('payrollRun', tenantId) },
+      // Phase 5: CRM models with tenantId
+      customer: { $allOperations: makeScopedHandler('customer', tenantId) },
+      appointment: { $allOperations: makeScopedHandler('appointment', tenantId) },
+      activityLog: { $allOperations: makeScopedHandler('activityLog', tenantId) },
     },
   }) as unknown as PrismaClient
   scopedClientCache.set(tenantId, cached)
@@ -141,6 +145,7 @@ const TENANT_SCOPED_DELEGATES = new Set([
   'user', 'account', 'journalEntry', 'invoice',
   'warehouse', 'product', 'stockMovement', 'purchaseOrder',
   'employee', 'payrollRun',
+  'customer', 'appointment', 'activityLog',
 ])
 
 function createDbProxy(): PrismaClient {

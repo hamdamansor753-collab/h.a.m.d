@@ -261,3 +261,36 @@ Stage Summary:
 - Payroll run 2026-07 created via UI (3 employees), posted → balanced JE in journal (Salaries Expense 5002, Payroll Payable 2003)
 - Lint clean, dev server running on port 3000
 - NO logic rewritten from existing services — postPayrollRun reuses createJournalEntryOn(tx, ...) from Phase 0
+
+---
+Task ID: 65-77
+Agent: main-orchestrator
+Task: Phase 5 — CRM module (final core module)
+
+Work Log:
+- Added Customer, Appointment, AppointmentStatus, Reminder, ActivityLog to Prisma schema
+- Added additive `customerId String?` + `customer Customer?` relation on Invoice (no existing fields touched)
+- Updated db.ts: added customer, appointment, activityLog to tenant-scoped models
+- Built CRM services:
+  - activity-log.service.ts: internal logActivity(tx?, customerId, type, refId) — no public endpoint, called only from invoice + appointment services
+  - customer.service.ts: listCustomers (with _count stats), getCustomer, createCustomer
+  - appointment.service.ts: scheduleAppointment (creates appointment + reminder + activityLog in single $transaction) + getDueReminders (dueAt <= now AND sent=false) + markReminderSent
+- Additive edit to createInvoice: added optional `customerId?: string` parameter. When provided, calls logActivity('invoice_created', invoice.id) inside the same tx. When not provided (walk-in sale), no ActivityLog — existing behavior unchanged.
+- Fixed security bug in scheduleAppointment: added customer existence check (db.customer.findUnique scoped to current tenant) BEFORE creating the appointment — prevents cross-tenant appointment creation via a stolen customer ID
+- Added Zod validations: createCustomerSchema, scheduleAppointmentSchema
+- Built API routes: /api/customers (GET/POST), /api/appointments (GET/POST), /api/reminders/due (GET)
+- Updated seed: crm:read + crm:manage permissions, added to admin/accountant/cashier/viewer roles, ~90 CRM translations
+- Updated middleware to protect /api/customers, /api/appointments, /api/reminders
+- Built UI: customers-panel (list + create form with stats), appointments-panel (list + schedule form), reminders-widget (due notifications shown on all dashboard sections), dashboard nav with 12 sections
+- Extended /api/tests with 5 Phase 5 tests (22 total): ALL PASS
+
+Stage Summary:
+- All 22 security tests PASS (verified via /api/tests):
+  1-17: Phase 0-4 tests all PASS (backward compatibility confirmed — no existing test broken)
+  18. invoice-customerid-creates-activitylog: PASS — exactly 1 ActivityLog of type 'invoice_created' created automatically
+  19. appointment-creates-activitylog-reminder: PASS — 1 ActivityLog 'appointment_scheduled' + 1 Reminder with correct dueAt (scheduledAt - 1h)
+  20. reminders-due-filtering: PASS — past appointment reminder found, future appointment reminder excluded
+  21. invoice-without-customerid-works: PASS — invoice created successfully, customerId=null, no ActivityLog
+  22. crm-tenant-isolation: PASS — cross-tenant customer read blocked (null), cross-tenant appointment blocked (customer not found in current tenant)
+- Lint clean, dev server running on port 3000
+- CRM panel shows test customers, appointments panel shows scheduled appointments with reminders

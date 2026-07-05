@@ -127,6 +127,10 @@ export async function getInvoice(id: string): Promise<InvoiceWithDetails | null>
  * function runs inside the caller's transaction (no own permission check,
  * uses tx with explicit tenantId). When not provided, uses db (with
  * middleware) as before.
+ * Phase 5 addition: optional `customerId` parameter. When provided, an
+ * ActivityLog entry (type: 'invoice_created') is created automatically
+ * inside the same transaction. When not provided (walk-in sale), no
+ * ActivityLog is created — the invoice still works exactly as before.
  */
 export async function createInvoice(
   input: {
@@ -134,6 +138,7 @@ export async function createInvoice(
     date: Date
     lines: Array<{ description: string; amount: number; taxRate?: number }>
     channel?: 'MANUAL' | 'POS'
+    customerId?: string
   },
   tx?: Prisma.TransactionClient
 ): Promise<InvoiceWithLines> {
@@ -144,7 +149,7 @@ export async function createInvoice(
   const client = tx ?? db
   const number = await nextInvoiceNumber(client, ctx.tenantId)
 
-  return (client as typeof db).invoice.create({
+  const invoice = await (client as typeof db).invoice.create({
     data: {
       tenantId: ctx.tenantId, // explicit — required for tx, harmless for db
       number,
@@ -152,6 +157,8 @@ export async function createInvoice(
       date: input.date,
       status: 'DRAFT',
       channel: input.channel ?? 'MANUAL',
+      // Phase 5: optional customer link (null for walk-in sales)
+      customerId: input.customerId ?? null,
       lines: {
         create: input.lines.map((l) => ({
           description: l.description,
@@ -162,6 +169,25 @@ export async function createInvoice(
     },
     include: { lines: true },
   })
+
+  // Phase 5: if a customer is linked, log the activity automatically.
+  // This runs inside the same transaction (tx) if provided, ensuring
+  // atomicity: if the invoice creation rolls back, the activity log
+  // rolls back too.
+  if (input.customerId) {
+    // Dynamic import to avoid circular dependency at module load time
+    const { logActivity } = await import('@/modules/crm/activity-log.service')
+    await logActivity(
+      {
+        customerId: input.customerId,
+        type: 'invoice_created',
+        refId: invoice.id,
+      },
+      tx
+    )
+  }
+
+  return invoice
 }
 
 /**
