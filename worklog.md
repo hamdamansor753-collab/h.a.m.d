@@ -191,3 +191,37 @@ Stage Summary:
 - POS sale via UI: clicked PROD-001 (laptop, 15000), checkout → INV-0033 created, stock 55→54, receipt shows subtotal 15000 + tax 2100 = total 17100
 - Lint clean, dev server running on port 3000
 - Confirmation: NO logic rewritten from invoice.service.ts or sales-movement.service.ts — posSale() only CALLS createInvoice, postInvoice, and recordSale
+
+---
+Task ID: 50
+Agent: main-orchestrator
+Task: Phase 3 atomicity fix — posSale() single-transaction refactor + test 12
+
+Work Log:
+- Problem identified: posSale() called createInvoice → postInvoice → recordSale as separate operations, each with their own internal db.$transaction(). A mid-flow failure (e.g., recordSale line 2 fails after postInvoice succeeds) left a partial state: invoice POSTED + revenue JE recorded, but no COGS/stock for line 2.
+- Solution: added optional `tx?: Prisma.TransactionClient` parameter to createInvoice, postInvoice, and recordSale (same pattern as recordMovement from Phase 2). When tx is provided:
+  - Skips requirePermission (caller — posSale — handles permissions; this also fixes the cashier role bug: cashier has pos:sell but not inventory:adjust, so recordSale's permission check would have failed for cashiers)
+  - Uses tx for all reads + writes with explicit tenantId in where/data (Phase 1 rule: tx has no tenant middleware)
+  - Does NOT start its own db.$transaction — runs inside the caller's tx
+  When tx is NOT provided: standalone behavior unchanged (permission check + own $transaction)
+- Refactored posSale() to wrap ALL writes (createInvoice + postInvoice + recordSale per line) inside a SINGLE db.$transaction(async (tx) => { ... }). If ANY step fails — including recordMovement's internal stock check inside recordSale — the entire transaction rolls back: no invoice, no JE, no stock movement.
+- Also refactored helper functions to accept client + tenantId:
+  - nextInvoiceNumber(client, tenantId) — counts with explicit tenantId
+  - resolvePostingAccounts(client, tenantId) — findFirst with explicit tenantId
+  - resolveSaleAccounts(client, tenantId) — findFirst with explicit tenantId
+- Added test 12 (pos-partial-failure-rollback): proves the atomicity fix by creating a scenario where:
+  - 2 lines of the SAME product, each requesting qty = current stock (individually passes pre-check)
+  - Combined qty = 2 × stock > stock → line 2's recordSale fails mid-transaction (stock already reduced by line 1)
+  - OLD code would leave: invoice POSTED + line 1 COGS + line 1 stock reduced (PARTIAL STATE)
+  - NEW code: entire transaction rolls back → zero side effects
+  - Test verifies: saleRejected=true, stockUnchanged=true, invoiceCountUnchanged=true, movementCountUnchanged=true, noLeakedInvoice=true
+
+Stage Summary:
+- All 12 security tests PASS (verified via /api/tests):
+  1-8: Phase 0-2 tests all PASS (unchanged)
+  9. pos-sale-invoice-stock-je: PASS — invoice channel=POS, stock reduced, 2 balanced JEs
+  10. pos-insufficient-stock-rejected: PASS — oversell rejected, zero side effects
+  11. pos-tenant-isolation: PASS — cross-tenant sale blocked
+  12. pos-partial-failure-rollback: PASS — scenario "2 lines × 117 units (stock=117), combined=234 > 117", saleRejected=true, stockUnchanged=true (117→117), invoiceCountUnchanged=true (46→46), movementCountUnchanged=true (21→21), noLeakedInvoice=true
+- Lint clean, dev server running on port 3000
+- NO logic rewritten from invoice.service.ts or sales-movement.service.ts — only added optional tx parameter + client/tenantId to helper functions. Existing standalone callers (API routes) see no behavior change.
