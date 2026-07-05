@@ -33,7 +33,7 @@ export function TestsPanel() {
     setResults(null)
     setAllPassed(null)
     try {
-      const r = await fetch('/api/tests', { method: 'POST' })
+      const r = await fetch('/api/tests', { method: 'POST', credentials: 'include' })
       const d = await r.json()
       if (!r.ok) {
         toast.error(d?.error?.message ?? t('common.error'))

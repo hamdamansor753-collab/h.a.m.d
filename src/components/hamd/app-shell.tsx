@@ -44,7 +44,7 @@ export function AppShell() {
     let cancelled = false
     ;(async () => {
       try {
-        const r = await fetch('/api/session', { cache: 'no-store' })
+        const r = await fetch('/api/session', { cache: 'no-store', credentials: 'include' })
         const data = await r.json()
         if (cancelled) return
         if (data.authenticated) {
@@ -54,7 +54,7 @@ export function AppShell() {
           setState('auth')
         } else {
           // Pre-load Arabic dictionary for the login screen
-          const dr = await fetch('/api/i18n/dictionary?locale=ar-EG', { cache: 'no-store' })
+          const dr = await fetch('/api/i18n/dictionary?locale=ar-EG', { cache: 'no-store', credentials: 'include' })
           const dd = await dr.json()
           if (cancelled) return
           setDictionary(dd.dictionary)
@@ -72,7 +72,7 @@ export function AppShell() {
   const changeLocale = useCallback(async (newLocale: Locale) => {
     setLocale(newLocale)
     try {
-      const r = await fetch(`/api/i18n/dictionary?locale=${newLocale}`, { cache: 'no-store' })
+      const r = await fetch(`/api/i18n/dictionary?locale=${newLocale}`, { cache: 'no-store', credentials: 'include' })
       const d = await r.json()
       setDictionary(d.dictionary)
     } catch {
@@ -81,15 +81,13 @@ export function AppShell() {
   }, [])
 
   const handleLogout = useCallback(async () => {
-    await fetch('/api/auth/signout', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ csrfToken: '', callbackUrl: '/' }),
-    })
+    // Use next-auth/react's signOut for proper CSRF handling + cookie clearing.
+    const { signOut } = await import('next-auth/react')
+    await signOut({ redirect: false })
     setUser(null)
     setState('unauth')
     // Reload Arabic dictionary for login screen
-    const dr = await fetch('/api/i18n/dictionary?locale=ar-EG', { cache: 'no-store' })
+    const dr = await fetch('/api/i18n/dictionary?locale=ar-EG', { cache: 'no-store', credentials: 'include' })
     const dd = await dr.json()
     setLocale('ar-EG')
     setDictionary(dd.dictionary)

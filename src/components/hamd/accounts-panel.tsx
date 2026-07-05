@@ -57,7 +57,7 @@ export function AccountsPanel({ canCreate }: Props) {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const r = await fetch('/api/accounts', { cache: 'no-store' })
+      const r = await fetch('/api/accounts', { cache: 'no-store', credentials: 'include' })
       if (!r.ok) throw new Error()
       const d = await r.json()
       setTree(d.tree)
@@ -79,6 +79,7 @@ export function AccountsPanel({ canCreate }: Props) {
     try {
       const r = await fetch('/api/accounts', {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           code,

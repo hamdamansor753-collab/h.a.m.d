@@ -58,8 +58,8 @@ export function JournalPanel({ canCreate }: Props) {
     setLoading(true)
     try {
       const [jeR, accR] = await Promise.all([
-        fetch('/api/journal', { cache: 'no-store' }),
-        fetch('/api/accounts', { cache: 'no-store' }),
+        fetch('/api/journal', { cache: 'no-store', credentials: 'include' }),
+        fetch('/api/accounts', { cache: 'no-store', credentials: 'include' }),
       ])
       if (!jeR.ok || !accR.ok) throw new Error()
       const je = await jeR.json()
@@ -101,6 +101,7 @@ export function JournalPanel({ canCreate }: Props) {
     try {
       const r = await fetch('/api/journal', {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           date: new Date(date).toISOString(),

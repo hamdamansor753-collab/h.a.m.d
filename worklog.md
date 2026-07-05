@@ -56,3 +56,25 @@ Stage Summary:
 - Dev server running on port 3000, all endpoints 200, no runtime errors
 - Key architectural decision documented: SQLite in sandbox (no native RLS) → tenant isolation enforced via Prisma client Proxy + per-tenant $extends clients + fail-closed context check. PostgreSQL RLS migration SQL provided for production cutover. The Proxy approach is actually STRONGER than raw RLS in one respect: it fail-closes on missing context rather than silently returning all rows.
 - Files produced: ~25 source files across prisma/, src/core/{tenancy,auth,rbac,i18n,ledger}/, src/lib/, src/app/api/{auth,session,accounts,journal,tests,i18n}/, src/components/hamd/, src/app/{layout,page,globals.css}
+
+---
+Task ID: 13
+Agent: main-orchestrator
+Task: Fix login session not persisting — user kicked back to login screen after entering credentials
+
+Work Log:
+- Diagnosed via dev.log: POST /api/auth/callback/credentials returned 200 (login succeeds) but subsequent /api/session returned unauthenticated → session cookie not being sent back
+- Root cause: NextAuth default cookies use SameSite=Lax, which browsers refuse to send on cross-origin iframe fetches (the preview panel embeds the app in an iframe). Also NEXTAUTH_URL was hardcoded to localhost:3000, so callback-url cookie pointed to the wrong host.
+- Fix applied in src/core/auth/options.ts:
+  1. Added trustHost: true — NextAuth auto-detects the host from the X-Forwarded-Host header sent by the Caddy gateway
+  2. Explicit cookie config with SameSite=None; Secure on all 6 NextAuth cookies (sessionToken, csrfToken, callbackUrl, pkceCodeVerifier, state, nonce) — allows the session cookie to travel with cross-origin iframe fetches
+  3. Removed NEXTAUTH_URL from .env (was forcing localhost:3000)
+- Added credentials: 'include' to all 10 client-side fetch calls (app-shell, accounts-panel, journal-panel, tests-panel) as belt-and-suspenders
+- Fixed logout to use next-auth/react's signOut() instead of a manual fetch (proper CSRF handling)
+- Verified: Chromium has a special exception that allows Secure cookies on localhost over HTTP, so agent-browser testing on localhost:3000 still works
+- Tested end-to-end: login as admin@afak.test → dashboard appears → accounts load (7 accounts) → security tests PASS → logout → back to login screen. All working.
+
+Stage Summary:
+- Login session now persists correctly through the preview panel (HTTPS + cross-origin iframe context)
+- The SameSite=None; Secure combination is required for any iframe-embedded app and is the standard NextAuth-behind-proxy configuration
+- No changes to the tenancy/auth/RBAC logic — only cookie/transport configuration

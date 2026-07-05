@@ -23,6 +23,44 @@ void loadTranslations()
 
 export const authOptions: NextAuthOptions = {
   session: { strategy: 'jwt' },
+  // Trust the Host header from the reverse proxy (Caddy gateway → platform
+  // preview frontend). Without this, NextAuth falls back to NEXTAUTH_URL
+  // (localhost:3000) which is NOT the host the browser sees, so cookies
+  // and callback URLs are computed for the wrong origin.
+  trustHost: true,
+  // The preview panel embeds the app in a cross-origin iframe. Browsers
+  // refuse to send `SameSite=Lax` cookies on cross-origin iframe fetches,
+  // which is why the session appeared to "not persist" after login. We
+  // must use `SameSite=None; Secure` so the session cookie travels with
+  // every fetch from the iframe. `Secure` works because the platform's
+  // preview frontend terminates TLS — the browser sees an HTTPS response
+  // even though the internal hop (gateway → app) is HTTP.
+  cookies: {
+    sessionToken: {
+      name: 'next-auth.session-token',
+      options: { httpOnly: true, sameSite: 'none', path: '/', secure: true },
+    },
+    csrfToken: {
+      name: 'next-auth.csrf-token',
+      options: { httpOnly: true, sameSite: 'none', path: '/', secure: true },
+    },
+    callbackUrl: {
+      name: 'next-auth.callback-url',
+      options: { sameSite: 'none', path: '/', secure: true },
+    },
+    pkceCodeVerifier: {
+      name: 'next-auth.pkce.code-verifier',
+      options: { httpOnly: true, sameSite: 'none', path: '/', secure: true },
+    },
+    state: {
+      name: 'next-auth.state',
+      options: { httpOnly: true, sameSite: 'none', path: '/', secure: true },
+    },
+    nonce: {
+      name: 'next-auth.nonce',
+      options: { httpOnly: true, sameSite: 'none', path: '/', secure: true },
+    },
+  },
   pages: {
     // We do not use a dedicated /login page — the single `/` route renders
     // either the login form (unauthenticated) or the dashboard. We still
