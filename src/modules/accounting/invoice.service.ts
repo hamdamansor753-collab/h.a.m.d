@@ -114,11 +114,16 @@ export async function getInvoice(id: string): Promise<InvoiceWithDetails | null>
 /**
  * Create a new DRAFT invoice.
  * Permission: invoice:create.
+ *
+ * Phase 3 addition: optional `channel` parameter (defaults to MANUAL).
+ * POS sales pass `channel: 'POS'` to mark the invoice as a POS sale.
+ * This is purely additive — existing callers see no change.
  */
 export async function createInvoice(input: {
   customerName: string
   date: Date
   lines: Array<{ description: string; amount: number; taxRate?: number }>
+  channel?: 'MANUAL' | 'POS'
 }): Promise<InvoiceWithLines> {
   requirePermission('invoice:create')
   const number = await nextInvoiceNumber()
@@ -128,6 +133,7 @@ export async function createInvoice(input: {
       customerName: input.customerName,
       date: input.date,
       status: 'DRAFT',
+      channel: input.channel ?? 'MANUAL',
       lines: {
         create: input.lines.map((l) => ({
           description: l.description,
@@ -214,7 +220,7 @@ export async function deleteInvoice(id: string): Promise<void> {
  *  2. Resolve posting accounts (AR, Revenue, Tax) by nameKey convention.
  *  3. Calculate tax via getTaxProvider(tenantCountry) — NO direct tax math.
  *  4. Build a balanced JournalEntry input:
- *       Debit  AR     = total (base + tax)
+ *       Debit  {debitAccount} = total (base + tax)  [AR by default; Cash for POS]
  *       Credit Revenue = base
  *       Credit Tax    = tax
  *     (debit = base + tax === credit = base + tax → always balanced)
@@ -222,9 +228,16 @@ export async function deleteInvoice(id: string): Promise<void> {
  *     Uses createJournalEntryOn(tx, ...) which reuses prepareJournalEntry
  *     from Phase 0 — no balance logic rewritten.
  *
+ * Phase 3 addition: optional `debitAccountId` parameter. When provided
+ * (by POS), it overrides the default AR account — POS debits Cash instead.
+ * The default behavior (AR) is unchanged for existing callers.
+ *
  * Permission: invoice:post.
  */
-export async function postInvoice(id: string): Promise<{ invoice: InvoiceWithLines; journalEntryId: string; tax: TaxResult }> {
+export async function postInvoice(
+  id: string,
+  options?: { debitAccountId?: string }
+): Promise<{ invoice: InvoiceWithLines; journalEntryId: string; tax: TaxResult }> {
   requirePermission('invoice:post')
 
   const ctx = getTenantContext()
@@ -243,8 +256,10 @@ export async function postInvoice(id: string): Promise<{ invoice: InvoiceWithLin
     throw new InvoiceStateError('NOT_DRAFT', 'Cannot post invoice with no lines')
   }
 
-  // 2. Resolve accounts
+  // 2. Resolve accounts. Use the override (Cash for POS) if provided,
+  //    otherwise default to AR.
   const { ar, revenue, tax: taxAccount } = await resolvePostingAccounts()
+  const debitAccount = options?.debitAccountId ? { id: options.debitAccountId } : ar
 
   // 3. Get the tenant's country to select the TaxProvider
   const tenant = await dbRaw.tenant.findUnique({
@@ -273,8 +288,8 @@ export async function postInvoice(id: string): Promise<{ invoice: InvoiceWithLin
     sourceModule: 'accounting',
     sourceRefId: invoice.id,
     lines: [
-      // Debit AR for the full total (base + tax)
-      { accountId: ar.id, debit: taxResult.total, credit: 0 },
+      // Debit {debitAccount} (AR for manual, Cash for POS) for the full total
+      { accountId: debitAccount.id, debit: taxResult.total, credit: 0 },
       // Credit Revenue for the base
       { accountId: revenue.id, debit: 0, credit: taxResult.totalBase },
       // Credit Tax Payable for the tax (only if tax > 0)

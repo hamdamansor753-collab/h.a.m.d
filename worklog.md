@@ -154,3 +154,40 @@ Stage Summary:
 - Income statement shows Revenue 2100 (from Phase 1 invoices), Expenses 0 (no sales yet)
 - Lint clean, dev server running on port 3000
 - Files produced: ~18 new/modified files across prisma/, src/modules/inventory/, src/app/api/{warehouses,products,purchase-orders}/, src/components/hamd/, src/lib/{validations,api,db,middleware}
+
+---
+Task ID: 40-49
+Agent: main-orchestrator
+Task: Phase 3 — POS (Point of Sale) module
+
+Work Log:
+- Added `channel InvoiceChannel @default(MANUAL)` field + `enum InvoiceChannel { MANUAL, POS }` to Invoice (additive, no existing fields touched)
+- Updated invoice.service.ts with two ADDITIVE optional parameters (no logic rewritten):
+  - createInvoice: optional `channel?: 'MANUAL' | 'POS'` (default MANUAL)
+  - postInvoice: optional `debitAccountId?: string` (default: AR account). When POS passes Cash account ID, it debits Cash instead of AR.
+- Built POS service (src/modules/pos/pos-sale.service.ts): single orchestration function `posSale()` that:
+  1. Pre-checks ALL lines' stock sufficiency BEFORE any write (the atomicity guarantee — if any line insufficient, throws InsufficientStockError with zero side effects)
+  2. Resolves the Cash account (POS debits Cash, not AR)
+  3. Gets the tenant's default tax rate from the TaxProvider
+  4. Calls createInvoice({ channel: 'POS' }) — Phase 1 service, unchanged
+  5. Calls postInvoice(id, { debitAccountId: cash.id }) — Phase 1 service, with optional param
+  6. Calls recordSale() for each line — Phase 2 service, unchanged
+  7. Returns { invoice, revenueJE, cogsJEs, totalRevenue, totalTax, totalAmount, totalCogs, netProfit }
+- NO logic rewritten from invoice.service.ts or sales-movement.service.ts — only called them
+- Added Zod validation: posSaleSchema (warehouseId, customerName, lines with productId/quantity/unitPrice)
+- Built API route: /api/pos/sale (POST) — runtime=nodejs, auth, permission(pos:sell), Zod, service-only
+- Updated seed: pos:sell permission, cashier role (pos:sell + invoice:read + inventory:read), cashier@afak.test user, ~70 POS translations
+- Updated middleware to protect /api/pos
+- Built POS UI (pos-panel.tsx): product grid with search + stock badges, cart with qty controls + live totals (subtotal + 14% tax + total), checkout button, receipt display with COGS + net profit
+- Dashboard: POS is the default view, nav has 8 sections with POS first
+- Extended /api/tests with 3 Phase 3 tests (11 total): ALL PASS
+
+Stage Summary:
+- All 11 security tests PASS (verified via /api/tests):
+  1-8: Phase 0-2 tests all PASS
+  9. pos-sale-invoice-stock-je: PASS — invoice channel=POS, stock reduced 82→80 (delta=2), revenue JE balanced (34200=34200), COGS JE balanced (211.80=211.80), COGS=2×105.90=211.80 correct, netProfit=29788.20
+  10. pos-insufficient-stock-rejected: PASS — oversell 5080 rejected (InsufficientStockError), stock unchanged 80→80, invoice count unchanged 39→39 (zero side effects)
+  11. pos-tenant-isolation: PASS — cross-tenant POS sale blocked (InventoryConfigError), no leaked invoice
+- POS sale via UI: clicked PROD-001 (laptop, 15000), checkout → INV-0033 created, stock 55→54, receipt shows subtotal 15000 + tax 2100 = total 17100
+- Lint clean, dev server running on port 3000
+- Confirmation: NO logic rewritten from invoice.service.ts or sales-movement.service.ts — posSale() only CALLS createInvoice, postInvoice, and recordSale

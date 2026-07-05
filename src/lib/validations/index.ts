@@ -102,3 +102,16 @@ export const createPurchaseOrderSchema = z.object({
   date: z.string().datetime(),
   lines: z.array(purchaseOrderLineSchema).min(1, 'a purchase order needs at least 1 line'),
 })
+
+// ---------------- POS (Phase 3) ----------------
+export const posSaleLineSchema = z.object({
+  productId: z.string().min(1),
+  quantity: z.coerce.number().min(0.01, 'quantity must be positive'),
+  unitPrice: z.coerce.number().min(0),
+})
+
+export const posSaleSchema = z.object({
+  warehouseId: z.string().min(1),
+  customerName: z.string().min(1).max(200),
+  lines: z.array(posSaleLineSchema).min(1, 'a POS sale needs at least 1 line'),
+})

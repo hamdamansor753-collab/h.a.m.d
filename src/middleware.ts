@@ -27,6 +27,8 @@ const PROTECTED_PREFIXES = [
   '/api/warehouses',
   '/api/products',
   '/api/purchase-orders',
+  // Phase 3: POS
+  '/api/pos',
 ]
 
 export async function middleware(req: NextRequest) {

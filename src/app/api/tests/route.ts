@@ -55,6 +55,8 @@ import { recordSale } from '@/modules/inventory/sales-movement.service'
 import { listStockMovements, getStockLevel } from '@/modules/inventory/stock-movement.service'
 import { listProducts } from '@/modules/inventory/product.service'
 import { listWarehouses } from '@/modules/inventory/warehouse.service'
+import { posSale } from '@/modules/pos/pos-sale.service'
+import { listInvoices as listAllInvoices } from '@/modules/accounting/invoice.service'
 import { JournalBalanceError, InvoiceStateError, InsufficientStockError } from '@/lib/api'
 import { db, dbRaw } from '@/lib/db'
 import { ok, mapError, unauthorized } from '@/lib/api'
@@ -598,6 +600,221 @@ export async function POST() {
         inventoryIsolationDetails = { error: e instanceof Error ? e.message : String(e) }
       }
       results.push({ name: 'inventory-tenant-isolation', passed: inventoryIsolationPassed, details: inventoryIsolationDetails })
+
+      // =================================================================
+      // PHASE 3 TESTS: POS sale creates invoice+stock+2 JEs, insufficient
+      // stock rejected before writes, POS tenant isolation
+      // =================================================================
+
+      // ---------------- Test 9: POS sale → invoice(POS) + stock reduced + 2 balanced JEs ----------------
+      let posSalePassed = false
+      let posSaleDetails: Record<string, unknown> = {}
+      try {
+        const products = await listProducts()
+        const warehouses = await listWarehouses()
+        if (products.length === 0 || warehouses.length === 0) {
+          throw new Error('No products or warehouses seeded')
+        }
+        const product = products[0]
+        const warehouse = warehouses[0]
+
+        // Record stock + invoice count BEFORE the POS sale
+        const stockBefore = await getStockLevel(product.id, warehouse.id)
+        const invoicesBefore = await listAllInvoices()
+
+        // Execute the POS sale: 2 units at the product's sellPrice
+        const sellPrice = Number(product.sellPrice)
+        const saleQty = 2
+        const result = await posSale({
+          warehouseId: warehouse.id,
+          customerName: 'POS Test Customer',
+          lines: [
+            { productId: product.id, quantity: saleQty, unitPrice: sellPrice },
+          ],
+        })
+
+        // (a) Verify invoice channel = POS
+        const channelCorrect = result.invoice.channel === 'POS'
+
+        // (b) Verify StockLevel decreased by saleQty
+        const stockAfter = await getStockLevel(product.id, warehouse.id)
+        const stockDelta = stockBefore - stockAfter
+        const stockCorrect = stockDelta === saleQty
+
+        // (c) Verify a new invoice appeared in /api/invoices
+        const invoicesAfter = await listAllInvoices()
+        const newInvoice = invoicesAfter.find((inv) => inv.id === result.invoice.id)
+        const invoiceFound = !!newInvoice
+
+        // (d) Verify TWO balanced journal entries (revenue + COGS)
+        const journalEntries = await listJournalEntries(200)
+        const revenueJE = journalEntries.find((e) => e.id === result.revenueJournalEntryId)
+        const cogsJE = journalEntries.find((e) => e.id === result.cogsJournalEntryIds[0])
+
+        const revenueDebit = revenueJE ? revenueJE.lines.reduce((s, l) => s + Number(l.debit), 0) : -1
+        const revenueCredit = revenueJE ? revenueJE.lines.reduce((s, l) => s + Number(l.credit), 0) : -1
+        const revenueBalanced = revenueJE ? Math.round(revenueDebit * 100) === Math.round(revenueCredit * 100) : false
+
+        const cogsDebit = cogsJE ? cogsJE.lines.reduce((s, l) => s + Number(l.debit), 0) : -1
+        const cogsCredit = cogsJE ? cogsJE.lines.reduce((s, l) => s + Number(l.credit), 0) : -1
+        const cogsBalanced = cogsJE ? Math.round(cogsDebit * 100) === Math.round(cogsCredit * 100) : false
+
+        // (e) Verify COGS = qty × costPrice (not sellPrice)
+        const expectedCogs = Number(product.costPrice) * saleQty
+        const cogsCorrect = Math.round(result.totalCogs * 100) === Math.round(expectedCogs * 100)
+
+        posSalePassed = channelCorrect && stockCorrect && invoiceFound && revenueBalanced && cogsBalanced && cogsCorrect
+        posSaleDetails = {
+          invoiceNumber: result.invoice.number,
+          invoiceChannel: result.invoice.channel,
+          channelCorrect,
+          stockBefore,
+          stockAfter,
+          stockDelta,
+          stockExpected: saleQty,
+          stockCorrect,
+          invoiceFound,
+          revenueJE: result.revenueJournalEntryId,
+          revenueBalanced,
+          revenueDebit: revenueDebit.toFixed(2),
+          revenueCredit: revenueCredit.toFixed(2),
+          cogsJE: result.cogsJournalEntryIds[0],
+          cogsBalanced,
+          cogsDebit: cogsDebit.toFixed(2),
+          cogsCredit: cogsCredit.toFixed(2),
+          totalCogs: result.totalCogs,
+          expectedCogs,
+          cogsCorrect,
+          netProfit: result.netProfit,
+        }
+      } catch (e) {
+        posSaleDetails = { error: e instanceof Error ? e.message : String(e) }
+      }
+      results.push({ name: 'pos-sale-invoice-stock-je', passed: posSalePassed, details: posSaleDetails })
+
+      // ---------------- Test 10: POS sale with insufficient stock → rejected before any write ----------------
+      let posInsufficientPassed = false
+      let posInsufficientDetails: Record<string, unknown> = {}
+      try {
+        const products = await listProducts()
+        const warehouses = await listWarehouses()
+        if (products.length === 0 || warehouses.length === 0) {
+          throw new Error('No products or warehouses seeded')
+        }
+        const product = products[0]
+        const warehouse = warehouses[0]
+
+        // Count invoices + stock BEFORE the attempted sale
+        const stockBefore = await getStockLevel(product.id, warehouse.id)
+        const invoicesBefore = await listAllInvoices()
+
+        // Attempt to sell WAY more than available
+        const oversellQty = stockBefore + 5000
+        let saleRejected = false
+        let saleError: string | null = null
+        try {
+          await posSale({
+            warehouseId: warehouse.id,
+            customerName: 'POS Oversell Test',
+            lines: [
+              { productId: product.id, quantity: oversellQty, unitPrice: Number(product.sellPrice) },
+            ],
+          })
+          saleRejected = false
+        } catch (e) {
+          saleRejected = e instanceof InsufficientStockError
+          saleError = e instanceof Error ? e.name : 'unknown'
+        }
+
+        // Verify NO invoice was created + stock unchanged
+        const stockAfter = await getStockLevel(product.id, warehouse.id)
+        const invoicesAfter = await listAllInvoices()
+        const stockUnchanged = stockBefore === stockAfter
+        const invoiceCountUnchanged = invoicesBefore.length === invoicesAfter.length
+
+        posInsufficientPassed = saleRejected && stockUnchanged && invoiceCountUnchanged
+        posInsufficientDetails = {
+          stockBefore,
+          oversellQuantity: oversellQty,
+          saleRejected,
+          saleError,
+          stockAfter,
+          stockUnchanged,
+          invoicesBefore: invoicesBefore.length,
+          invoicesAfter: invoicesAfter.length,
+          invoiceCountUnchanged,
+        }
+      } catch (e) {
+        posInsufficientDetails = { error: e instanceof Error ? e.message : String(e) }
+      }
+      results.push({ name: 'pos-insufficient-stock-rejected', passed: posInsufficientPassed, details: posInsufficientDetails })
+
+      // ---------------- Test 11: POS tenant isolation ----------------
+      let posIsolationPassed = false
+      let posIsolationDetails: Record<string, unknown> = {}
+      try {
+        // Create a product in the OTHER tenant using dbRaw
+        const otherProduct = await dbRaw.product.create({
+          data: {
+            tenantId: otherTenantAccount?.tenantId ?? 'tenant-noor',
+            sku: `POS-X-${Date.now()}`,
+            nameKey: 'product.mouse',
+            costPrice: 50,
+            sellPrice: 100,
+          },
+        })
+        // Create a warehouse in the other tenant
+        const otherWarehouse = await dbRaw.warehouse.create({
+          data: {
+            tenantId: otherProduct.tenantId,
+            nameKey: 'warehouse.main',
+            isDefault: false,
+          },
+        })
+
+        // Attempt a POS sale using the OTHER tenant's product + warehouse
+        // via the current tenant's service layer. This should fail because:
+        //  1. The pre-check fetches products via db.product (scoped to current
+        //     tenant) — the other tenant's product won't be found.
+        let crossSaleBlocked = false
+        let crossSaleError: string | null = null
+        try {
+          await posSale({
+            warehouseId: otherWarehouse.id,
+            customerName: 'Cross-tenant POS attempt',
+            lines: [
+              { productId: otherProduct.id, quantity: 1, unitPrice: 100 },
+            ],
+          })
+          crossSaleBlocked = false
+        } catch (e) {
+          crossSaleBlocked = true
+          crossSaleError = e instanceof Error ? e.name : 'unknown'
+        }
+
+        // Verify no invoice was created with the other tenant's product
+        const myInvoices = await listAllInvoices()
+        const leakedInvoice = myInvoices.find(
+          (inv) => inv.customerName === 'Cross-tenant POS attempt'
+        )
+
+        posIsolationPassed = crossSaleBlocked && !leakedInvoice
+        posIsolationDetails = {
+          currentTenantId: ctx.tenantId,
+          otherTenantId: otherProduct.tenantId,
+          otherProductSku: otherProduct.sku,
+          crossTenantSaleBlocked: crossSaleBlocked,
+          crossTenantError: crossSaleError,
+          leakedInvoiceFound: !!leakedInvoice,
+        }
+
+        // Cleanup
+        await dbRaw.product.delete({ where: { id: otherProduct.id } })
+        await dbRaw.warehouse.delete({ where: { id: otherWarehouse.id } })
+      } catch (e) {
+        posIsolationDetails = { error: e instanceof Error ? e.message : String(e) }
+      }
+      results.push({ name: 'pos-tenant-isolation', passed: posIsolationPassed, details: posIsolationDetails })
 
       return results
     })

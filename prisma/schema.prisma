@@ -169,6 +169,7 @@ model Invoice {
   customerName   String
   date           DateTime
   status         InvoiceStatus @default(DRAFT)
+  channel        InvoiceChannel @default(MANUAL) // "MANUAL" | "POS" — distinguishes POS sales
   lines          InvoiceLine[]
   // Filled on posting — links to the JournalEntry that recorded this invoice
   // in the ledger. Null while DRAFT, set when POSTED, kept (not nulled) on VOID.
@@ -187,6 +188,11 @@ enum InvoiceStatus {
   DRAFT
   POSTED // posted to ledger — immutable after this point
   VOID   // voided with a reversing entry — original entry stays for audit
+}
+
+enum InvoiceChannel {
+  MANUAL // created manually via the invoicing module (credit sale, debits AR)
+  POS    // created via POS (cash sale, debits Cash)
 }
 
 model InvoiceLine {
