@@ -45,7 +45,17 @@ import {
   voidInvoice,
   listInvoices,
 } from '@/modules/accounting/invoice.service'
-import { JournalBalanceError, InvoiceStateError } from '@/lib/api'
+import {
+  createPurchaseOrder,
+  receivePurchaseOrder,
+  listPurchaseOrders,
+  getPurchaseOrder,
+} from '@/modules/inventory/purchase-order.service'
+import { recordSale } from '@/modules/inventory/sales-movement.service'
+import { listStockMovements, getStockLevel } from '@/modules/inventory/stock-movement.service'
+import { listProducts } from '@/modules/inventory/product.service'
+import { listWarehouses } from '@/modules/inventory/warehouse.service'
+import { JournalBalanceError, InvoiceStateError, InsufficientStockError } from '@/lib/api'
 import { db, dbRaw } from '@/lib/db'
 import { ok, mapError, unauthorized } from '@/lib/api'
 
@@ -393,6 +403,201 @@ export async function POST() {
         invoiceIsolationDetails = { error: e instanceof Error ? e.message : String(e) }
       }
       results.push({ name: 'invoice-tenant-isolation', passed: invoiceIsolationPassed, details: invoiceIsolationDetails })
+
+      // =================================================================
+      // PHASE 2 TESTS: Purchase order receive + stock + JE, insufficient
+      // stock rejection, inventory tenant isolation
+      // =================================================================
+
+      // ---------------- Test 6: PO receive → stock + balanced JE + movements ----------------
+      let poReceivePassed = false
+      let poReceiveDetails: Record<string, unknown> = {}
+      try {
+        // Fetch a product + warehouse for the current tenant
+        const products = await listProducts()
+        const warehouses = await listWarehouses()
+        if (products.length === 0 || warehouses.length === 0) {
+          throw new Error('No products or warehouses seeded')
+        }
+        const product = products[0]
+        const warehouse = warehouses[0]
+
+        // Record stock level BEFORE receiving
+        const stockBefore = await getStockLevel(product.id, warehouse.id)
+
+        // Create a DRAFT PO with 2 lines
+        const po = await createPurchaseOrder({
+          supplierName: 'Test Supplier (auto-cleanup)',
+          date: new Date(),
+          lines: [
+            { productId: product.id, quantity: 10, unitCost: 100, warehouseId: warehouse.id },
+            { productId: product.id, quantity: 5, unitCost: 120, warehouseId: warehouse.id },
+          ],
+        })
+
+        // Receive the PO
+        const received = await receivePurchaseOrder(po.id)
+
+        // (a) Verify StockLevel increased by the correct amount (10 + 5 = 15)
+        const stockAfter = await getStockLevel(product.id, warehouse.id)
+        const stockDelta = stockAfter - stockBefore
+        const stockCorrect = stockDelta === 15
+
+        // (b) Verify a balanced JournalEntry was created
+        const journalEntries = await listJournalEntries(100)
+        const je = journalEntries.find((e) => e.id === received.journalEntryId)
+        const debitSum = je ? je.lines.reduce((s, l) => s + Number(l.debit), 0) : -1
+        const creditSum = je ? je.lines.reduce((s, l) => s + Number(l.credit), 0) : -1
+        const balanced = je ? Math.round(debitSum * 100) === Math.round(creditSum * 100) : false
+
+        // (c) Verify total cost = (10×100) + (5×120) = 1000 + 600 = 1600
+        const expectedTotal = 1600
+        const totalCorrect = Math.round(received.totalCost) === expectedTotal
+
+        // (d) Verify EXACTLY one StockMovement per line (2 movements for 2 lines)
+        const movements = await listStockMovements(200)
+        const poMovements = movements.filter((m) => m.sourceRefId === po.id)
+        const movementsCountCorrect = poMovements.length === 2
+
+        // (e) Verify PO status is RECEIVED
+        const poAfter = await getPurchaseOrder(po.id)
+        const statusCorrect = poAfter?.status === 'RECEIVED'
+
+        poReceivePassed = stockCorrect && balanced && totalCorrect && movementsCountCorrect && statusCorrect
+        poReceiveDetails = {
+          poNumber: po.number,
+          stockBefore,
+          stockAfter,
+          stockDelta,
+          stockExpected: 15,
+          stockCorrect,
+          journalEntryId: received.journalEntryId,
+          journalEntryFound: !!je,
+          debitSum: debitSum.toFixed(2),
+          creditSum: creditSum.toFixed(2),
+          balanced,
+          totalCost: received.totalCost,
+          totalExpected: expectedTotal,
+          totalCorrect,
+          movementsCount: poMovements.length,
+          movementsExpected: 2,
+          movementsCountCorrect,
+          statusAfter: poAfter?.status,
+          statusCorrect,
+        }
+      } catch (e) {
+        poReceiveDetails = { error: e instanceof Error ? e.message : String(e) }
+      }
+      results.push({ name: 'po-receive-stock-je', passed: poReceivePassed, details: poReceiveDetails })
+
+      // ---------------- Test 7: recordSale with insufficient stock → rejected ----------------
+      let insufficientStockPassed = false
+      let insufficientStockDetails: Record<string, unknown> = {}
+      try {
+        const products = await listProducts()
+        const warehouses = await listWarehouses()
+        if (products.length === 0 || warehouses.length === 0) {
+          throw new Error('No products or warehouses seeded')
+        }
+        const product = products[0]
+        const warehouse = warehouses[0]
+
+        // Get current stock
+        const stockBefore = await getStockLevel(product.id, warehouse.id)
+
+        // Attempt to sell MORE than available (stockBefore + 1000)
+        const oversellQty = stockBefore + 1000
+        let saleRejected = false
+        let saleError: string | null = null
+        try {
+          await recordSale({
+            productId: product.id,
+            warehouseId: warehouse.id,
+            quantity: oversellQty,
+            sourceRefId: 'test-oversell',
+          })
+          saleRejected = false
+        } catch (e) {
+          saleRejected = e instanceof InsufficientStockError
+          saleError = e instanceof Error ? e.name : 'unknown'
+        }
+
+        // Verify stock is UNCHANGED
+        const stockAfter = await getStockLevel(product.id, warehouse.id)
+        const stockUnchanged = stockBefore === stockAfter
+
+        insufficientStockPassed = saleRejected && stockUnchanged
+        insufficientStockDetails = {
+          productId: product.id,
+          warehouseId: warehouse.id,
+          stockBefore,
+          oversellQuantity: oversellQty,
+          saleRejected,
+          saleError,
+          stockAfter,
+          stockUnchanged,
+        }
+      } catch (e) {
+        insufficientStockDetails = { error: e instanceof Error ? e.message : String(e) }
+      }
+      results.push({ name: 'insufficient-stock-rejected', passed: insufficientStockPassed, details: insufficientStockDetails })
+
+      // ---------------- Test 8: Inventory tenant isolation ----------------
+      let inventoryIsolationPassed = false
+      let inventoryIsolationDetails: Record<string, unknown> = {}
+      try {
+        // Create a product in the OTHER tenant using dbRaw
+        const otherProduct = await dbRaw.product.create({
+          data: {
+            tenantId: otherTenantAccount?.tenantId ?? 'tenant-noor',
+            sku: `TEST-X-${Date.now()}`,
+            nameKey: 'product.mouse',
+            costPrice: 0,
+            sellPrice: 100,
+          },
+        })
+
+        // (a) Try to READ the other tenant's product via the service layer
+        const myProducts = await listProducts()
+        const leakedProduct = myProducts.find((p) => p.id === otherProduct.id) ?? null
+
+        // (b) Try to RECEIVE a PO referencing the other tenant's product
+        //     (should fail — the product doesn't exist in our tenant)
+        const myWarehouses = await listWarehouses()
+        let crossCreateBlocked = false
+        let crossCreateError: string | null = null
+        try {
+          const po = await createPurchaseOrder({
+            supplierName: 'Cross-tenant attempt',
+            date: new Date(),
+            lines: [
+              { productId: otherProduct.id, quantity: 1, unitCost: 10, warehouseId: myWarehouses[0].id },
+            ],
+          })
+          // If create succeeded, try to receive it — should fail
+          await receivePurchaseOrder(po.id)
+          crossCreateBlocked = false
+        } catch (e) {
+          crossCreateBlocked = true
+          crossCreateError = e instanceof Error ? e.name : 'unknown'
+        }
+
+        inventoryIsolationPassed = leakedProduct === null && crossCreateBlocked
+        inventoryIsolationDetails = {
+          currentTenantId: ctx.tenantId,
+          otherTenantId: otherProduct.tenantId,
+          otherProductSku: otherProduct.sku,
+          crossTenantReadResult: leakedProduct === null ? 'null (blocked)' : 'LEAKED',
+          crossTenantPoCreateOrReceiveBlocked: crossCreateBlocked,
+          crossTenantError: crossCreateError,
+        }
+
+        // Cleanup: delete the other tenant's test product
+        await dbRaw.product.delete({ where: { id: otherProduct.id } })
+      } catch (e) {
+        inventoryIsolationDetails = { error: e instanceof Error ? e.message : String(e) }
+      }
+      results.push({ name: 'inventory-tenant-isolation', passed: inventoryIsolationPassed, details: inventoryIsolationDetails })
 
       return results
     })

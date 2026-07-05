@@ -104,6 +104,43 @@ export class InvoiceConfigError extends Error {
 }
 
 /**
+ * Thrown by the inventory service when required inventory accounts are missing.
+ */
+export class InventoryConfigError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'InventoryConfigError'
+  }
+}
+
+/**
+ * Thrown by the purchase-order service when an operation is attempted on a
+ * PO in the wrong state (e.g. receiving a non-DRAFT PO).
+ */
+export class PurchaseOrderStateError extends Error {
+  constructor(public code: 'NOT_DRAFT' | 'NOT_RECEIVED', message: string) {
+    super(message)
+    this.name = 'PurchaseOrderStateError'
+  }
+}
+
+/**
+ * Thrown by the stock-movement service when a sale/transfer would result
+ * in negative stock.
+ */
+export class InsufficientStockError extends Error {
+  constructor(
+    public productId: string,
+    public warehouseId: string,
+    public requested: number,
+    public available: number
+  ) {
+    super(`Insufficient stock: requested ${requested}, available ${available}`)
+    this.name = 'InsufficientStockError'
+  }
+}
+
+/**
  * Map a thrown error from the service layer to an HTTP response.
  */
 export function mapError(err: unknown, locale: ApiLocale): NextResponse {
@@ -135,6 +172,21 @@ export function mapError(err: unknown, locale: ApiLocale): NextResponse {
     return NextResponse.json<ApiErrorBody>(
       { error: { code: 'INVOICE_CONFIG', message: t('invoice.configError', locale) } },
       { status: 500 }
+    )
+  }
+  if (err instanceof InventoryConfigError) {
+    return NextResponse.json<ApiErrorBody>(
+      { error: { code: 'INVENTORY_CONFIG', message: t('inventory.configError', locale) } },
+      { status: 500 }
+    )
+  }
+  if (err instanceof PurchaseOrderStateError) {
+    return conflict(locale, 'purchaseOrder.cannotModify')
+  }
+  if (err instanceof InsufficientStockError) {
+    return NextResponse.json<ApiErrorBody>(
+      { error: { code: 'INSUFFICIENT_STOCK', message: t('inventory.insufficientStock', locale) } },
+      { status: 400 }
     )
   }
   return serverError(locale)

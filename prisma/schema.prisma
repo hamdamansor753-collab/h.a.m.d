@@ -35,6 +35,10 @@ model Tenant {
   accounts      Account[]
   journalEntries JournalEntry[]
   invoices      Invoice[]
+  warehouses    Warehouse[]
+  products      Product[]
+  stockMovements StockMovement[]
+  purchaseOrders PurchaseOrder[]
 }
 
 model User {
@@ -118,6 +122,10 @@ model JournalEntry {
   postedInvoice Invoice?
   // Back-relation: the invoice (if any) that this entry voided.
   voidedInvoice Invoice? @relation("InvoiceVoidEntry")
+  // Back-relation: stock movements (purchase receipt, sale COGS) linked to this entry.
+  stockMovements StockMovement[]
+  // Back-relation: the purchase order (if any) that generated this entry on receipt.
+  receivedPurchaseOrder PurchaseOrder?
   createdAt    DateTime      @default(now())
 
   @@index([tenantId, date])
@@ -188,4 +196,108 @@ model InvoiceLine {
   description String
   amount      Decimal
   taxRate     Decimal @default(0) // per-line rate (0.14 = 14%)
+}
+
+// ================= PHASE 2: INVENTORY & PURCHASING =================
+
+model Warehouse {
+  id          String       @id @default(uuid())
+  tenantId    String
+  tenant      Tenant       @relation(fields: [tenantId], references: [id])
+  nameKey     String       // translation key — never raw text
+  isDefault   Boolean      @default(false)
+  stockLevels StockLevel[]
+  createdAt   DateTime     @default(now())
+
+  @@index([tenantId])
+}
+
+model Product {
+  id          String       @id @default(uuid())
+  tenantId    String
+  tenant      Tenant       @relation(fields: [tenantId], references: [id])
+  sku         String
+  nameKey     String       // translation key — never raw text
+  costPrice   Decimal      @default(0) // weighted-average cost — updated on receipts
+  sellPrice   Decimal      @default(0)
+  stockLevels StockLevel[]
+  createdAt   DateTime     @default(now())
+
+  @@unique([tenantId, sku])
+  @@index([tenantId])
+}
+
+model StockLevel {
+  id          String    @id @default(uuid())
+  productId   String
+  product     Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  warehouseId String
+  warehouse   Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  quantity    Decimal   @default(0)
+
+  @@unique([productId, warehouseId])
+}
+
+model StockMovement {
+  // Append-only audit trail. NEVER edited or deleted — every stock change
+  // creates a new row. StockLevel.quantity is a DERIVED value kept in sync
+  // by the stock-movement service inside the same transaction.
+  id            String            @id @default(uuid())
+  tenantId      String
+  tenant        Tenant            @relation(fields: [tenantId], references: [id])
+  productId     String
+  warehouseId   String
+  type          StockMovementType
+  quantity      Decimal           // always positive; direction determined by `type`
+  unitCost      Decimal           // cost per unit at time of movement (for COGS accuracy)
+  sourceModule  String            // "purchase" | "sales" | "adjustment" | "transfer"
+  sourceRefId   String            // ID of the originating document
+  journalEntryId String?  // filled if the movement generated a ledger entry (multiple movements can share one JE)
+  journalEntry   JournalEntry?   @relation(fields: [journalEntryId], references: [id])
+  createdAt     DateTime          @default(now())
+
+  @@index([tenantId, productId])
+  @@index([tenantId, warehouseId])
+}
+
+enum StockMovementType {
+  RECEIPT      // stock in from supplier (purchase order receipt)
+  SALE         // stock out for a sale
+  TRANSFER_IN  // stock in from another warehouse
+  TRANSFER_OUT // stock out to another warehouse
+  ADJUSTMENT   // inventory count adjustment (can be +/-)
+}
+
+model PurchaseOrder {
+  id            String              @id @default(uuid())
+  tenantId      String
+  tenant        Tenant              @relation(fields: [tenantId], references: [id])
+  number        String              // sequential per tenant, non-reusable
+  supplierName  String
+  date          DateTime
+  status        PurchaseOrderStatus @default(DRAFT)
+  lines         PurchaseOrderLine[]
+  // Filled on receive — the JournalEntry recording the inventory + AP entry.
+  journalEntryId String? @unique
+  journalEntry   JournalEntry? @relation(fields: [journalEntryId], references: [id])
+  createdAt     DateTime            @default(now())
+
+  @@unique([tenantId, number])
+  @@index([tenantId])
+}
+
+enum PurchaseOrderStatus {
+  DRAFT
+  RECEIVED   // goods received — StockMovement(RECEIPT) + ledger entry created
+  CANCELLED
+}
+
+model PurchaseOrderLine {
+  id              String        @id @default(uuid())
+  purchaseOrderId String
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  productId       String
+  quantity        Decimal
+  unitCost        Decimal
+  warehouseId     String
 }

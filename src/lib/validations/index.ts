@@ -69,3 +69,36 @@ export const updateInvoiceSchema = z.object({
   date: z.string().datetime().optional(),
   lines: z.array(invoiceLineSchema).min(1).optional(),
 })
+
+// ---------------- Inventory (Phase 2) ----------------
+export const createProductSchema = z.object({
+  sku: z.string().min(1).max(50),
+  nameKey: z
+    .string()
+    .min(1)
+    .max(100)
+    .regex(/^[a-z0-9]+(\.[a-z0-9]+)+$/, 'nameKey must be a dotted translation key'),
+  sellPrice: z.coerce.number().min(0),
+})
+
+export const createWarehouseSchema = z.object({
+  nameKey: z
+    .string()
+    .min(1)
+    .max(100)
+    .regex(/^[a-z0-9]+(\.[a-z0-9]+)+$/, 'nameKey must be a dotted translation key'),
+  isDefault: z.boolean().optional(),
+})
+
+export const purchaseOrderLineSchema = z.object({
+  productId: z.string().min(1),
+  quantity: z.coerce.number().min(0.01, 'quantity must be positive'),
+  unitCost: z.coerce.number().min(0),
+  warehouseId: z.string().min(1),
+})
+
+export const createPurchaseOrderSchema = z.object({
+  supplierName: z.string().min(1).max(200),
+  date: z.string().datetime(),
+  lines: z.array(purchaseOrderLineSchema).min(1, 'a purchase order needs at least 1 line'),
+})

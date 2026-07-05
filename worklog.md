@@ -113,3 +113,44 @@ Stage Summary:
 - Income statement shows Revenue 2100 (2000 from invoice + 100 from Phase 0 manual entry)
 - Lint clean, dev server running on port 3000
 - Files produced: ~15 new/modified files across prisma/, src/core/{tax,ledger,auth}/, src/modules/accounting/, src/app/api/{invoices,reports}/, src/components/hamd/
+
+---
+Task ID: 27-39
+Agent: main-orchestrator
+Task: Phase 2 — Inventory & Purchasing module
+
+Work Log:
+- Added Warehouse, Product, StockLevel, StockMovement, StockMovementType, PurchaseOrder, PurchaseOrderLine, PurchaseOrderStatus to Prisma schema
+- Added back-relations on Tenant and JournalEntry (stockMovements, receivedPurchaseOrder)
+- Updated db.ts: added warehouse, product, stockMovement, purchaseOrder to tenant-scoped models. StockLevel + PurchaseOrderLine stay unscoped (inherit via parent, like InvoiceLine/JournalLine)
+- Built inventory services:
+  - product.service.ts: listProducts (with stock levels), getProduct, createProduct
+  - warehouse.service.ts: listWarehouses, getWarehouse, createWarehouse, getDefaultWarehouse
+  - stock-movement.service.ts: THE SOLE StockLevel writer — recordMovement() creates StockMovement + upserts StockLevel in same tx. Checks insufficient stock for outbound. Also exports computeWeightedAverageCost() (pure function) + getStockLevel + listStockMovements
+  - purchase-order.service.ts: CRUD DRAFT + receivePurchaseOrder (per-line StockMovement(RECEIPT) + weighted-avg costPrice update + ONE balanced JE Debit Inventory/Credit AP + link movements to JE, all in db.$transaction)
+  - sales-movement.service.ts: recordSale (rejects if insufficient stock via InsufficientStockError + StockMovement(SALE) + COGS JE Debit COGS/Credit Inventory)
+- Weighted average cost implementation: newCostPrice = (currentQty×currentCost + receivedQty×receivedUnitCost) / (currentQty + receivedQty). Pools ALL warehouses' stock into one per-product cost (future: per-warehouse). FIFO/LIFO deferred per spec.
+- Added Zod validations: createProductSchema, createWarehouseSchema, purchaseOrderLineSchema, createPurchaseOrderSchema. Relaxed productId/warehouseId from uuid() to string().min(1) because seed uses non-UUID warehouse IDs (tenant-afak-wh-main)
+- Built API routes (all runtime=nodejs, Zod, service-only): /api/warehouses, /api/products, /api/purchase-orders, /api/purchase-orders/[id], /api/purchase-orders/[id]/receive
+- Updated seed: 4 new permissions (inventory:read, inventory:adjust, purchase:create, purchase:receive) synced to admin/accountant/viewer roles. Added Inventory(ASSET), AP(LIABILITY), COGS(EXPENSE) accounts. Added default warehouse per tenant + sample products (PROD-001/002/003 for afak, ITEM-101/102 for noor). ~120 inventory/purchase translations across ar-EG/ar-SA/en
+- Updated Next.js middleware to protect /api/warehouses, /api/products, /api/purchase-orders
+- Built UI: inventory-panel (products table with stock levels + warehouses list + create forms), purchase-orders-panel (list + create form with product/warehouse selectors + receive button), dashboard nav with 7 sections
+- Extended /api/tests with 3 Phase 2 tests (8 total): all PASS
+- Fixed two bugs during verification:
+  1. Zod uuid() validation rejected non-UUID warehouse IDs → relaxed to string().min(1)
+  2. StockMovement.journalEntryId had @unique constraint → blocked linking multiple movements to one PO's JE → removed @unique (multiple movements per JE is the correct design)
+
+Stage Summary:
+- All 8 security tests PASS (verified via /api/tests):
+  1. tenant-isolation: PASS
+  2. journal-balance: PASS
+  3. invoice-post-balanced: PASS
+  4. posted-invoice-immutable: PASS
+  5. invoice-tenant-isolation: PASS
+  6. po-receive-stock-je: PASS (stockDelta=15, balanced 1600=1600, movementsCount=2, status=RECEIVED)
+  7. insufficient-stock-rejected: PASS (oversell 1040 rejected, stock unchanged 40→40)
+  8. inventory-tenant-isolation: PASS (cross-tenant read=null, PO create/receive blocked)
+- PO-0001 created via UI (10 units @ 100), received → stock=10, costPrice=100, balanced JE in journal
+- Income statement shows Revenue 2100 (from Phase 1 invoices), Expenses 0 (no sales yet)
+- Lint clean, dev server running on port 3000
+- Files produced: ~18 new/modified files across prisma/, src/modules/inventory/, src/app/api/{warehouses,products,purchase-orders}/, src/components/hamd/, src/lib/{validations,api,db,middleware}

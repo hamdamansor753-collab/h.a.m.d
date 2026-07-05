@@ -23,6 +23,10 @@ const PROTECTED_PREFIXES = [
   '/api/session',
   '/api/invoices',
   '/api/reports',
+  // Phase 2: inventory
+  '/api/warehouses',
+  '/api/products',
+  '/api/purchase-orders',
 ]
 
 export async function middleware(req: NextRequest) {

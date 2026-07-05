@@ -113,6 +113,11 @@ function getScopedClient(tenantId: string): PrismaClient {
       account: { $allOperations: makeScopedHandler('account', tenantId) },
       journalEntry: { $allOperations: makeScopedHandler('journalEntry', tenantId) },
       invoice: { $allOperations: makeScopedHandler('invoice', tenantId) },
+      // Phase 2: inventory models with tenantId
+      warehouse: { $allOperations: makeScopedHandler('warehouse', tenantId) },
+      product: { $allOperations: makeScopedHandler('product', tenantId) },
+      stockMovement: { $allOperations: makeScopedHandler('stockMovement', tenantId) },
+      purchaseOrder: { $allOperations: makeScopedHandler('purchaseOrder', tenantId) },
     },
   }) as unknown as PrismaClient
   scopedClientCache.set(tenantId, cached)
@@ -122,12 +127,17 @@ function getScopedClient(tenantId: string): PrismaClient {
 // ---------- The default `db` Proxy ----------
 
 // Delegate names that require tenant scoping. Any other delegate
-// (translation, role, permission, tenant, invoiceLine, journalLine) passes
-// through to dbRaw. NOTE: invoiceLine and journalLine have NO tenantId
-// column — they inherit scope from their parent (Invoice / JournalEntry).
+// (translation, role, permission, tenant, invoiceLine, journalLine,
+//  stockLevel, purchaseOrderLine) passes through to dbRaw. NOTE: the
+// unscoped child models (invoiceLine, journalLine, stockLevel,
+// purchaseOrderLine) have NO tenantId column — they inherit scope from
+// their parent (Invoice / JournalEntry / Product+Warehouse / PurchaseOrder).
 // They must ONLY be accessed via nested include/create under their scoped
-// parent, never queried directly via db.invoiceLine / db.journalLine.
-const TENANT_SCOPED_DELEGATES = new Set(['user', 'account', 'journalEntry', 'invoice'])
+// parent, never queried directly via db.stockLevel / db.purchaseOrderLine.
+const TENANT_SCOPED_DELEGATES = new Set([
+  'user', 'account', 'journalEntry', 'invoice',
+  'warehouse', 'product', 'stockMovement', 'purchaseOrder',
+])
 
 function createDbProxy(): PrismaClient {
   return new Proxy({} as PrismaClient, {

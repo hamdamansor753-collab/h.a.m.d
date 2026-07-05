@@ -36,6 +36,11 @@ async function main() {
     'invoice:post',
     'invoice:void',
     'system:test',
+    // Phase 2: inventory + purchase
+    'inventory:read',
+    'inventory:adjust',
+    'purchase:create',
+    'purchase:receive',
   ]
   const permissions = await Promise.all(
     permissionKeys.map((key) =>
@@ -58,6 +63,8 @@ async function main() {
         'user:read', 'tenant:manage',
         'invoice:create', 'invoice:read', 'invoice:post', 'invoice:void',
         'system:test',
+        'inventory:read', 'inventory:adjust',
+        'purchase:create', 'purchase:receive',
       ],
     },
     {
@@ -66,11 +73,13 @@ async function main() {
         'account:read', 'account:create', 'account:update',
         'journal:read', 'journal:create',
         'invoice:create', 'invoice:read', 'invoice:post',
+        'inventory:read',
+        'purchase:create', 'purchase:receive',
       ],
     },
     {
       name: 'viewer',
-      perms: ['account:read', 'journal:read', 'invoice:read'],
+      perms: ['account:read', 'journal:read', 'invoice:read', 'inventory:read'],
     },
   ]
   const roles: Record<string, { id: string }> = {}
@@ -153,20 +162,27 @@ async function main() {
     { code: '1001', nameKey: 'account.cash',      type: AccountType.ASSET,     parentCode: '1000' },
     { code: '1002', nameKey: 'account.bank',      type: AccountType.ASSET,     parentCode: '1000' },
     { code: '1003', nameKey: 'account.receivable', type: AccountType.ASSET,    parentCode: '1000' },
+    { code: '1004', nameKey: 'account.inventory', type: AccountType.ASSET,     parentCode: '1000' },
     { code: '2000', nameKey: 'account.liabilities',type: AccountType.LIABILITY, parentId: null },
     { code: '2001', nameKey: 'account.salesTax',  type: AccountType.LIABILITY, parentCode: '2000' },
+    { code: '2002', nameKey: 'account.payable',   type: AccountType.LIABILITY, parentCode: '2000' },
     { code: '3000', nameKey: 'account.equity',    type: AccountType.EQUITY,    parentId: null },
     { code: '4000', nameKey: 'account.revenue',   type: AccountType.REVENUE,   parentId: null },
     { code: '5000', nameKey: 'account.expense',   type: AccountType.EXPENSE,   parentId: null },
+    { code: '5001', nameKey: 'account.cogs',      type: AccountType.EXPENSE,   parentCode: '5000' },
   ]
   const noorAccounts = [
     { code: '1100', nameKey: 'account.assets',    type: AccountType.ASSET,     parentId: null },
     { code: '1101', nameKey: 'account.cash',      type: AccountType.ASSET,     parentCode: '1100' },
     { code: '1102', nameKey: 'account.receivable', type: AccountType.ASSET,    parentCode: '1100' },
+    { code: '1103', nameKey: 'account.inventory', type: AccountType.ASSET,     parentCode: '1100' },
     { code: '2100', nameKey: 'account.liabilities',type: AccountType.LIABILITY, parentId: null },
     { code: '2101', nameKey: 'account.salesTax',  type: AccountType.LIABILITY, parentCode: '2100' },
+    { code: '2102', nameKey: 'account.payable',   type: AccountType.LIABILITY, parentCode: '2100' },
     { code: '3100', nameKey: 'account.equity',    type: AccountType.EQUITY,    parentId: null },
     { code: '4100', nameKey: 'account.revenue',   type: AccountType.REVENUE,   parentId: null },
+    { code: '5100', nameKey: 'account.expense',   type: AccountType.EXPENSE,   parentId: null },
+    { code: '5101', nameKey: 'account.cogs',      type: AccountType.EXPENSE,   parentCode: '5100' },
   ]
 
   async function seedChart(tenantId: string, accounts: Array<{ code: string; nameKey: string; type: AccountType; parentId?: string | null; parentCode?: string }>) {
@@ -192,6 +208,40 @@ async function main() {
   }
   await seedChart('tenant-afak', afakAccounts)
   await seedChart('tenant-noor', noorAccounts)
+
+  // ---------- 5b. Warehouses + Products (Phase 2) ----------
+  for (const tenantId of ['tenant-afak', 'tenant-noor']) {
+    await prisma.warehouse.upsert({
+      where: { id: `${tenantId}-wh-main` },
+      update: {},
+      create: { id: `${tenantId}-wh-main`, tenantId, nameKey: 'warehouse.main', isDefault: true },
+    })
+  }
+
+  // Sample products per tenant (different SKUs to make isolation visible)
+  const afakProducts = [
+    { sku: 'PROD-001', nameKey: 'product.laptop',     sellPrice: 15000 },
+    { sku: 'PROD-002', nameKey: 'product.mouse',      sellPrice: 250 },
+    { sku: 'PROD-003', nameKey: 'product.keyboard',   sellPrice: 450 },
+  ]
+  const noorProducts = [
+    { sku: 'ITEM-101', nameKey: 'product.laptop',     sellPrice: 16000 },
+    { sku: 'ITEM-102', nameKey: 'product.mouse',      sellPrice: 300 },
+  ]
+  for (const p of afakProducts) {
+    await prisma.product.upsert({
+      where: { tenantId_sku: { tenantId: 'tenant-afak', sku: p.sku } },
+      update: { nameKey: p.nameKey, sellPrice: p.sellPrice },
+      create: { tenantId: 'tenant-afak', sku: p.sku, nameKey: p.nameKey, sellPrice: p.sellPrice, costPrice: 0 },
+    })
+  }
+  for (const p of noorProducts) {
+    await prisma.product.upsert({
+      where: { tenantId_sku: { tenantId: 'tenant-noor', sku: p.sku } },
+      update: { nameKey: p.nameKey, sellPrice: p.sellPrice },
+      create: { tenantId: 'tenant-noor', sku: p.sku, nameKey: p.nameKey, sellPrice: p.sellPrice, costPrice: 0 },
+    })
+  }
 
   // ---------- 6. Translations ----------
   const translations: Array<{ key: string; locale: string; value: string }> = [
@@ -472,6 +522,154 @@ async function main() {
     { key: 'report.noData',              locale: 'ar-EG', value: 'لا توجد بيانات مالية' },
     { key: 'report.noData',              locale: 'ar-SA', value: 'لا توجد بيانات مالية' },
     { key: 'report.noData',              locale: 'en',    value: 'No financial data' },
+
+    // Inventory (Phase 2)
+    { key: 'nav.inventory',      locale: 'ar-EG', value: 'المخزون' },
+    { key: 'nav.inventory',      locale: 'ar-SA', value: 'المخزون' },
+    { key: 'nav.inventory',      locale: 'en',    value: 'Inventory' },
+    { key: 'nav.purchases',      locale: 'ar-EG', value: 'المشتريات' },
+    { key: 'nav.purchases',      locale: 'ar-SA', value: 'المشتريات' },
+    { key: 'nav.purchases',      locale: 'en',    value: 'Purchases' },
+    { key: 'inventory.title',    locale: 'ar-EG', value: 'المخزون' },
+    { key: 'inventory.title',    locale: 'ar-SA', value: 'المخزون' },
+    { key: 'inventory.title',    locale: 'en',    value: 'Inventory' },
+    { key: 'inventory.products', locale: 'ar-EG', value: 'المنتجات' },
+    { key: 'inventory.products', locale: 'ar-SA', value: 'المنتجات' },
+    { key: 'inventory.products', locale: 'en',    value: 'Products' },
+    { key: 'inventory.warehouses',locale: 'ar-EG', value: 'المخازن' },
+    { key: 'inventory.warehouses',locale: 'ar-SA', value: 'المخازن' },
+    { key: 'inventory.warehouses',locale: 'en',    value: 'Warehouses' },
+    { key: 'inventory.sku',      locale: 'ar-EG', value: 'رمز المنتج' },
+    { key: 'inventory.sku',      locale: 'ar-SA', value: 'رمز المنتج' },
+    { key: 'inventory.sku',      locale: 'en',    value: 'SKU' },
+    { key: 'inventory.name',     locale: 'ar-EG', value: 'الاسم' },
+    { key: 'inventory.name',     locale: 'ar-SA', value: 'الاسم' },
+    { key: 'inventory.name',     locale: 'en',    value: 'Name' },
+    { key: 'inventory.costPrice',locale: 'ar-EG', value: 'تكلفة الوحدة' },
+    { key: 'inventory.costPrice',locale: 'ar-SA', value: 'تكلفة الوحدة' },
+    { key: 'inventory.costPrice',locale: 'en',    value: 'Cost Price' },
+    { key: 'inventory.sellPrice',locale: 'ar-EG', value: 'سعر البيع' },
+    { key: 'inventory.sellPrice',locale: 'ar-SA', value: 'سعر البيع' },
+    { key: 'inventory.sellPrice',locale: 'en',    value: 'Sell Price' },
+    { key: 'inventory.stock',    locale: 'ar-EG', value: 'الكمية' },
+    { key: 'inventory.stock',    locale: 'ar-SA', value: 'الكمية' },
+    { key: 'inventory.stock',    locale: 'en',    value: 'Stock' },
+    { key: 'inventory.createProduct',locale: 'ar-EG', value: 'منتج جديد' },
+    { key: 'inventory.createProduct',locale: 'ar-SA', value: 'منتج جديد' },
+    { key: 'inventory.createProduct',locale: 'en',    value: 'New Product' },
+    { key: 'inventory.createWarehouse',locale: 'ar-EG', value: 'مخزن جديد' },
+    { key: 'inventory.createWarehouse',locale: 'ar-SA', value: 'مخزن جديد' },
+    { key: 'inventory.createWarehouse',locale: 'en',    value: 'New Warehouse' },
+    { key: 'inventory.empty',    locale: 'ar-EG', value: 'لا توجد بيانات' },
+    { key: 'inventory.empty',    locale: 'ar-SA', value: 'لا توجد بيانات' },
+    { key: 'inventory.empty',    locale: 'en',    value: 'No data' },
+    { key: 'inventory.insufficientStock',locale: 'ar-EG', value: 'الكمية المتاحة غير كافية' },
+    { key: 'inventory.insufficientStock',locale: 'ar-SA', value: 'الكمية المتاحة غير كافية' },
+    { key: 'inventory.insufficientStock',locale: 'en',    value: 'Insufficient stock' },
+    { key: 'inventory.configError',locale: 'ar-EG', value: 'خطأ في إعداد حسابات المخزون' },
+    { key: 'inventory.configError',locale: 'ar-SA', value: 'خطأ في إعداد حسابات المخزون' },
+    { key: 'inventory.configError',locale: 'en',    value: 'Inventory accounts not configured' },
+    { key: 'inventory.default',  locale: 'ar-EG', value: 'افتراضي' },
+    { key: 'inventory.default',  locale: 'ar-SA', value: 'افتراضي' },
+    { key: 'inventory.default',  locale: 'en',    value: 'Default' },
+
+    // Purchase orders (Phase 2)
+    { key: 'purchaseOrder.title',     locale: 'ar-EG', value: 'أوامر الشراء' },
+    { key: 'purchaseOrder.title',     locale: 'ar-SA', value: 'أوامر الشراء' },
+    { key: 'purchaseOrder.title',     locale: 'en',    value: 'Purchase Orders' },
+    { key: 'purchaseOrder.number',    locale: 'ar-EG', value: 'رقم الأمر' },
+    { key: 'purchaseOrder.number',    locale: 'ar-SA', value: 'رقم الأمر' },
+    { key: 'purchaseOrder.number',    locale: 'en',    value: 'PO No.' },
+    { key: 'purchaseOrder.supplier',  locale: 'ar-EG', value: 'المورد' },
+    { key: 'purchaseOrder.supplier',  locale: 'ar-SA', value: 'المورد' },
+    { key: 'purchaseOrder.supplier',  locale: 'en',    value: 'Supplier' },
+    { key: 'purchaseOrder.date',      locale: 'ar-EG', value: 'التاريخ' },
+    { key: 'purchaseOrder.date',      locale: 'ar-SA', value: 'التاريخ' },
+    { key: 'purchaseOrder.date',      locale: 'en',    value: 'Date' },
+    { key: 'purchaseOrder.status',    locale: 'ar-EG', value: 'الحالة' },
+    { key: 'purchaseOrder.status',    locale: 'ar-SA', value: 'الحالة' },
+    { key: 'purchaseOrder.status',    locale: 'en',    value: 'Status' },
+    { key: 'purchaseOrder.total',     locale: 'ar-EG', value: 'الإجمالي' },
+    { key: 'purchaseOrder.total',     locale: 'ar-SA', value: 'الإجمالي' },
+    { key: 'purchaseOrder.total',     locale: 'en',    value: 'Total' },
+    { key: 'purchaseOrder.create',    locale: 'ar-EG', value: 'أمر شراء جديد' },
+    { key: 'purchaseOrder.create',    locale: 'ar-SA', value: 'أمر شراء جديد' },
+    { key: 'purchaseOrder.create',    locale: 'en',    value: 'New Purchase Order' },
+    { key: 'purchaseOrder.receive',   locale: 'ar-EG', value: 'استلام' },
+    { key: 'purchaseOrder.receive',   locale: 'ar-SA', value: 'استلام' },
+    { key: 'purchaseOrder.receive',   locale: 'en',    value: 'Receive' },
+    { key: 'purchaseOrder.received',  locale: 'ar-EG', value: 'تم استلام الأمر بنجاح' },
+    { key: 'purchaseOrder.received',  locale: 'ar-SA', value: 'تم استلام الأمر بنجاح' },
+    { key: 'purchaseOrder.received',  locale: 'en',    value: 'Purchase order received' },
+    { key: 'purchaseOrder.empty',     locale: 'ar-EG', value: 'لا توجد أوامر شراء' },
+    { key: 'purchaseOrder.empty',     locale: 'ar-SA', value: 'لا توجد أوامر شراء' },
+    { key: 'purchaseOrder.empty',     locale: 'en',    value: 'No purchase orders' },
+    { key: 'purchaseOrder.lines',     locale: 'ar-EG', value: 'بنود الأمر' },
+    { key: 'purchaseOrder.lines',     locale: 'ar-SA', value: 'بنود الأمر' },
+    { key: 'purchaseOrder.lines',     locale: 'en',    value: 'Order Lines' },
+    { key: 'purchaseOrder.product',   locale: 'ar-EG', value: 'المنتج' },
+    { key: 'purchaseOrder.product',   locale: 'ar-SA', value: 'المنتج' },
+    { key: 'purchaseOrder.product',   locale: 'en',    value: 'Product' },
+    { key: 'purchaseOrder.warehouse', locale: 'ar-EG', value: 'المخزن' },
+    { key: 'purchaseOrder.warehouse', locale: 'ar-SA', value: 'المخزن' },
+    { key: 'purchaseOrder.warehouse', locale: 'en',    value: 'Warehouse' },
+    { key: 'purchaseOrder.quantity',  locale: 'ar-EG', value: 'الكمية' },
+    { key: 'purchaseOrder.quantity',  locale: 'ar-SA', value: 'الكمية' },
+    { key: 'purchaseOrder.quantity',  locale: 'en',    value: 'Quantity' },
+    { key: 'purchaseOrder.unitCost',  locale: 'ar-EG', value: 'تكلفة الوحدة' },
+    { key: 'purchaseOrder.unitCost',  locale: 'ar-SA', value: 'تكلفة الوحدة' },
+    { key: 'purchaseOrder.unitCost',  locale: 'en',    value: 'Unit Cost' },
+    { key: 'purchaseOrder.addLine',   locale: 'ar-EG', value: 'إضافة بند' },
+    { key: 'purchaseOrder.addLine',   locale: 'ar-SA', value: 'إضافة بند' },
+    { key: 'purchaseOrder.addLine',   locale: 'en',    value: 'Add line' },
+    { key: 'purchaseOrder.save',      locale: 'ar-EG', value: 'حفظ الأمر' },
+    { key: 'purchaseOrder.save',      locale: 'ar-SA', value: 'حفظ الأمر' },
+    { key: 'purchaseOrder.save',      locale: 'en',    value: 'Save order' },
+    { key: 'purchaseOrder.cancel',    locale: 'ar-EG', value: 'إلغاء' },
+    { key: 'purchaseOrder.cancel',    locale: 'ar-SA', value: 'إلغاء' },
+    { key: 'purchaseOrder.cancel',    locale: 'en',    value: 'Cancel' },
+    { key: 'purchaseOrder.notFound',  locale: 'ar-EG', value: 'أمر الشراء غير موجود' },
+    { key: 'purchaseOrder.notFound',  locale: 'ar-SA', value: 'أمر الشراء غير موجود' },
+    { key: 'purchaseOrder.notFound',  locale: 'en',    value: 'Purchase order not found' },
+    { key: 'purchaseOrder.cannotModify',locale: 'ar-EG', value: 'لا يمكن تعديل أمر شراء مستلم' },
+    { key: 'purchaseOrder.cannotModify',locale: 'ar-SA', value: 'لا يمكن تعديل أمر شراء مستلم' },
+    { key: 'purchaseOrder.cannotModify',locale: 'en',    value: 'Cannot modify a received purchase order' },
+    { key: 'purchaseOrder.status.DRAFT',    locale: 'ar-EG', value: 'مسودة' },
+    { key: 'purchaseOrder.status.DRAFT',    locale: 'ar-SA', value: 'مسودة' },
+    { key: 'purchaseOrder.status.DRAFT',    locale: 'en',    value: 'Draft' },
+    { key: 'purchaseOrder.status.RECEIVED', locale: 'ar-EG', value: 'مستلم' },
+    { key: 'purchaseOrder.status.RECEIVED', locale: 'ar-SA', value: 'مستلم' },
+    { key: 'purchaseOrder.status.RECEIVED', locale: 'en',    value: 'Received' },
+    { key: 'purchaseOrder.status.CANCELLED',locale: 'ar-EG', value: 'ملغي' },
+    { key: 'purchaseOrder.status.CANCELLED',locale: 'ar-SA', value: 'ملغي' },
+    { key: 'purchaseOrder.status.CANCELLED',locale: 'en',    value: 'Cancelled' },
+
+    // Account names (Phase 2 additions)
+    { key: 'account.inventory',   locale: 'ar-EG', value: 'المخزون' },
+    { key: 'account.inventory',   locale: 'ar-SA', value: 'المخزون' },
+    { key: 'account.inventory',   locale: 'en',    value: 'Inventory' },
+    { key: 'account.payable',     locale: 'ar-EG', value: 'حسابات دائنة (موردون)' },
+    { key: 'account.payable',     locale: 'ar-SA', value: 'حسابات دائنة (موردون)' },
+    { key: 'account.payable',     locale: 'en',    value: 'Accounts Payable' },
+    { key: 'account.cogs',        locale: 'ar-EG', value: 'تكلفة البضاعة المباعة' },
+    { key: 'account.cogs',        locale: 'ar-SA', value: 'تكلفة البضاعة المباعة' },
+    { key: 'account.cogs',        locale: 'en',    value: 'Cost of Goods Sold' },
+
+    // Product names
+    { key: 'product.laptop',      locale: 'ar-EG', value: 'لابتوب' },
+    { key: 'product.laptop',      locale: 'ar-SA', value: 'لابتوب' },
+    { key: 'product.laptop',      locale: 'en',    value: 'Laptop' },
+    { key: 'product.mouse',       locale: 'ar-EG', value: 'ماوس' },
+    { key: 'product.mouse',       locale: 'ar-SA', value: 'ماوس' },
+    { key: 'product.mouse',       locale: 'en',    value: 'Mouse' },
+    { key: 'product.keyboard',    locale: 'ar-EG', value: 'لوحة مفاتيح' },
+    { key: 'product.keyboard',    locale: 'ar-SA', value: 'لوحة مفاتيح' },
+    { key: 'product.keyboard',    locale: 'en',    value: 'Keyboard' },
+
+    // Warehouse names
+    { key: 'warehouse.main',      locale: 'ar-EG', value: 'المخزن الرئيسي' },
+    { key: 'warehouse.main',      locale: 'ar-SA', value: 'المخزن الرئيسي' },
+    { key: 'warehouse.main',      locale: 'en',    value: 'Main Warehouse' },
 
     // Tests
     { key: 'tests.title',        locale: 'ar-EG', value: 'اختبارات العزل والتوازن' },
