@@ -115,3 +115,20 @@ export const posSaleSchema = z.object({
   customerName: z.string().min(1).max(200),
   lines: z.array(posSaleLineSchema).min(1, 'a POS sale needs at least 1 line'),
 })
+
+// ---------------- HR & Payroll (Phase 4) ----------------
+export const createEmployeeSchema = z.object({
+  fullName: z.string().min(1).max(200),
+  nationalId: z.string().min(1).max(50),
+  hireDate: z.string().datetime(),
+  baseSalary: z.coerce.number().min(0),
+  status: z.enum(['ACTIVE', 'SUSPENDED', 'TERMINATED']).optional(),
+})
+
+export const createPayrollRunSchema = z.object({
+  period: z
+    .string()
+    .min(1)
+    .max(10)
+    .regex(/^\d{4}-\d{2}$/, 'period must be YYYY-MM format'),
+})

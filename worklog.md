@@ -225,3 +225,39 @@ Stage Summary:
   12. pos-partial-failure-rollback: PASS — scenario "2 lines × 117 units (stock=117), combined=234 > 117", saleRejected=true, stockUnchanged=true (117→117), invoiceCountUnchanged=true (46→46), movementCountUnchanged=true (21→21), noLeakedInvoice=true
 - Lint clean, dev server running on port 3000
 - NO logic rewritten from invoice.service.ts or sales-movement.service.ts — only added optional tx parameter + client/tenantId to helper functions. Existing standalone callers (API routes) see no behavior change.
+
+---
+Task ID: 51-64
+Agent: main-orchestrator
+Task: Phase 4 — HR & Payroll module
+
+Work Log:
+- Added Employee, EmployeeStatus, PayrollRun, PayrollStatus, PayrollLine to Prisma schema + back-relations on Tenant and JournalEntry
+- Updated db.ts: added employee, payrollRun to tenant-scoped models. PayrollLine inherits scope via PayrollRun (like InvoiceLine via Invoice)
+- Built PayrollRuleProvider interface + registry (src/core/payroll/provider.ts) — same pluggable pattern as TaxProvider
+- Built EgyptPayrollRuleProvider (src/core/payroll/egypt-payroll-provider.ts) — SIMPLIFIED calculation clearly marked as placeholder:
+  - Flat 10% income tax above 5000 EGP/month threshold (placeholder for progressive brackets)
+  - Employee insurance 14% / employer insurance 11% (roughly matching current Egyptian rates, without caps)
+  - Self-registers on import (imported by auth/options.ts at server start)
+- Built employee.service.ts: CRUD + salary field filtering. listEmployees(canReadSalary) strips baseSalary + nationalId when canReadSalary=false (defense in depth: API is authoritative, UI also checks)
+- Built payroll.service.ts: createPayrollRun (gathers ACTIVE employees, calculates via provider, creates PayrollLines) + postPayrollRun (single $transaction: creates ONE balanced JE + updates status to POSTED)
+- postPayrollRun JE structure: Debit Salaries Expense = gross+employerIns, Credit Payroll Payable = netPay, Credit Payroll Tax = incomeTax, Credit Social Insurance = empIns+employerIns. Always balanced (debit = gross+employerIns = netPay+incomeTax+empIns+employerIns = credit)
+- Added 4 new accounts to seed: account.salaries (EXPENSE), account.payrollPayable (LIABILITY), account.payrollTax (LIABILITY), account.socialInsurance (LIABILITY)
+- Added 4 new permissions: hr:read, hr:manage, hr:salary:read, payroll:run
+- Added hr_manager role (hr:read + hr:manage + hr:salary:read + payroll:run) + hr@afak.test user
+- Added 3 sample employees to tenant-afak (different nationalIds, salaries 8500-15000)
+- Built API routes: /api/employees (GET/POST, salary filtering), /api/payroll-runs (GET/POST), /api/payroll-runs/[id] (GET), /api/payroll-runs/[id]/post (POST)
+- Built UI: employees-panel (list + create form, salary hidden without permission), payroll-panel (period picker + run + post + per-line breakdown + totals), dashboard nav with 10 sections
+- Extended /api/tests with 5 Phase 4 tests (17 total): ALL PASS
+
+Stage Summary:
+- All 17 security tests PASS (verified via /api/tests):
+  1-12: Phase 0-3 tests all PASS (unchanged)
+  13. payroll-post-balanced-je: PASS — 3 employees, JE balanced (39405=39405), amounts correct (gross=35500, tax=1553, empIns=4970, erIns=3905, net=28977)
+  14. salary-field-hidden-without-permission: PASS — canReadSalary=false strips baseSalary+nationalId, canReadSalary=true includes them
+  15. posted-payroll-immutable: PASS — re-posting a POSTED run rejected (PayrollStateError)
+  16. payroll-partial-failure-rollback: PASS — posting non-existent ID rejected, JE count unchanged (108→108)
+  17. hr-tenant-isolation: PASS — cross-tenant employee read blocked (null)
+- Payroll run 2026-07 created via UI (3 employees), posted → balanced JE in journal (Salaries Expense 5002, Payroll Payable 2003)
+- Lint clean, dev server running on port 3000
+- NO logic rewritten from existing services — postPayrollRun reuses createJournalEntryOn(tx, ...) from Phase 0

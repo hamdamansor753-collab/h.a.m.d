@@ -29,6 +29,9 @@ const PROTECTED_PREFIXES = [
   '/api/purchase-orders',
   // Phase 3: POS
   '/api/pos',
+  // Phase 4: HR & payroll
+  '/api/employees',
+  '/api/payroll-runs',
 ]
 
 export async function middleware(req: NextRequest) {

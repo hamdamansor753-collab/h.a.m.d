@@ -141,6 +141,28 @@ export class InsufficientStockError extends Error {
 }
 
 /**
+ * Thrown by the HR payroll service when required payroll accounts are missing.
+ */
+export class HrConfigError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'HrConfigError'
+  }
+}
+
+/**
+ * Thrown by the payroll service when an operation is attempted on a
+ * PayrollRun in the wrong state (e.g. posting a non-DRAFT run, editing
+ * a POSTED run).
+ */
+export class PayrollStateError extends Error {
+  constructor(public code: 'NOT_DRAFT' | 'ALREADY_POSTED', message: string) {
+    super(message)
+    this.name = 'PayrollStateError'
+  }
+}
+
+/**
  * Map a thrown error from the service layer to an HTTP response.
  */
 export function mapError(err: unknown, locale: ApiLocale): NextResponse {
@@ -188,6 +210,15 @@ export function mapError(err: unknown, locale: ApiLocale): NextResponse {
       { error: { code: 'INSUFFICIENT_STOCK', message: t('inventory.insufficientStock', locale) } },
       { status: 400 }
     )
+  }
+  if (err instanceof HrConfigError) {
+    return NextResponse.json<ApiErrorBody>(
+      { error: { code: 'HR_CONFIG', message: t('hr.configError', locale) } },
+      { status: 500 }
+    )
+  }
+  if (err instanceof PayrollStateError) {
+    return conflict(locale, 'payroll.cannotModify')
   }
   return serverError(locale)
 }

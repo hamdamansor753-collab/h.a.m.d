@@ -20,6 +20,9 @@ import { loadTranslations } from '@/core/i18n'
 // Import the Egypt tax provider so it self-registers on server start.
 // The import has a side effect (registerTaxProvider) — do not remove.
 import '@/core/tax/egypt-tax-provider'
+// Import the Egypt payroll provider so it self-registers on server start.
+// The import has a side effect (registerPayrollProvider) — do not remove.
+import '@/core/payroll/egypt-payroll-provider'
 
 // Warm the i18n cache on module load so the first request has it ready.
 void loadTranslations()

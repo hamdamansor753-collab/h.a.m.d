@@ -39,6 +39,8 @@ model Tenant {
   products      Product[]
   stockMovements StockMovement[]
   purchaseOrders PurchaseOrder[]
+  employees     Employee[]
+  payrollRuns   PayrollRun[]
 }
 
 model User {
@@ -126,6 +128,8 @@ model JournalEntry {
   stockMovements StockMovement[]
   // Back-relation: the purchase order (if any) that generated this entry on receipt.
   receivedPurchaseOrder PurchaseOrder?
+  // Back-relation: the payroll run (if any) that generated this entry on posting.
+  postedPayrollRun PayrollRun?
   createdAt    DateTime      @default(now())
 
   @@index([tenantId, date])
@@ -306,4 +310,61 @@ model PurchaseOrderLine {
   quantity        Decimal
   unitCost        Decimal
   warehouseId     String
+}
+
+// ================= PHASE 4: HR & PAYROLL =================
+
+model Employee {
+  id           String         @id @default(uuid())
+  tenantId     String
+  tenant       Tenant         @relation(fields: [tenantId], references: [id])
+  fullName     String
+  nationalId   String         // الرقم القومي/الهوية — بيانات حساسة (لا تُسجَّل في logs)
+  hireDate     DateTime
+  baseSalary   Decimal        // بيانات حساسة — تتطلب hr:salary:read
+  status       EmployeeStatus @default(ACTIVE)
+  payrollLines PayrollLine[]
+  createdAt    DateTime       @default(now())
+
+  @@index([tenantId])
+}
+
+enum EmployeeStatus {
+  ACTIVE
+  SUSPENDED
+  TERMINATED
+}
+
+model PayrollRun {
+  id             String       @id @default(uuid())
+  tenantId       String
+  tenant         Tenant       @relation(fields: [tenantId], references: [id])
+  period         String       // "2026-07" — YYYY-MM
+  status         PayrollStatus @default(DRAFT)
+  lines          PayrollLine[]
+  // Filled on posting — links to the JournalEntry recording the payroll.
+  journalEntryId String? @unique
+  journalEntry   JournalEntry? @relation(fields: [journalEntryId], references: [id])
+  createdAt      DateTime     @default(now())
+
+  @@unique([tenantId, period])
+  @@index([tenantId])
+}
+
+enum PayrollStatus {
+  DRAFT
+  POSTED // posted to ledger — immutable after this point
+}
+
+model PayrollLine {
+  id               String    @id @default(uuid())
+  payrollRunId     String
+  payrollRun       PayrollRun @relation(fields: [payrollRunId], references: [id], onDelete: Cascade)
+  employeeId       String
+  employee         Employee  @relation(fields: [employeeId], references: [id])
+  grossSalary      Decimal
+  incomeTax        Decimal   @default(0)  // from PayrollRuleProvider
+  employeeInsurance Decimal  @default(0)  // employee's share
+  employerInsurance Decimal  @default(0)  // employer's share (extra cost, not deducted from employee)
+  netPay           Decimal                // = grossSalary - incomeTax - employeeInsurance
 }

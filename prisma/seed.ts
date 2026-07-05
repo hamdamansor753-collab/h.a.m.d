@@ -43,6 +43,11 @@ async function main() {
     'purchase:receive',
     // Phase 3: POS
     'pos:sell',
+    // Phase 4: HR + payroll
+    'hr:read',
+    'hr:manage',
+    'hr:salary:read',
+    'payroll:run',
   ]
   const permissions = await Promise.all(
     permissionKeys.map((key) =>
@@ -68,6 +73,7 @@ async function main() {
         'inventory:read', 'inventory:adjust',
         'purchase:create', 'purchase:receive',
         'pos:sell',
+        'hr:read', 'hr:manage', 'hr:salary:read', 'payroll:run',
       ],
     },
     {
@@ -78,7 +84,12 @@ async function main() {
         'invoice:create', 'invoice:read', 'invoice:post',
         'inventory:read',
         'purchase:create', 'purchase:receive',
+        'hr:read', 'hr:salary:read',
       ],
+    },
+    {
+      name: 'hr_manager',
+      perms: ['hr:read', 'hr:manage', 'hr:salary:read', 'payroll:run'],
     },
     {
       name: 'cashier',
@@ -86,7 +97,7 @@ async function main() {
     },
     {
       name: 'viewer',
-      perms: ['account:read', 'journal:read', 'invoice:read', 'inventory:read'],
+      perms: ['account:read', 'journal:read', 'invoice:read', 'inventory:read', 'hr:read'],
     },
   ]
   const roles: Record<string, { id: string }> = {}
@@ -137,6 +148,7 @@ async function main() {
   const userDefs = [
     { email: 'admin@afak.test',     name: 'مدير الأفق',   tenantId: 'tenant-afak', role: 'admin' },
     { email: 'accountant@afak.test',name: 'محاسب الأفق',  tenantId: 'tenant-afak', role: 'accountant' },
+    { email: 'hr@afak.test',        name: 'مدير موارد بشرية', tenantId: 'tenant-afak', role: 'hr_manager' },
     { email: 'cashier@afak.test',   name: 'كاشير الأفق',  tenantId: 'tenant-afak', role: 'cashier' },
     { email: 'viewer@afak.test',    name: 'مشاهد الأفق',  tenantId: 'tenant-afak', role: 'viewer' },
     { email: 'admin@noor.test',     name: 'مدير النور',   tenantId: 'tenant-noor', role: 'admin' },
@@ -174,10 +186,14 @@ async function main() {
     { code: '2000', nameKey: 'account.liabilities',type: AccountType.LIABILITY, parentId: null },
     { code: '2001', nameKey: 'account.salesTax',  type: AccountType.LIABILITY, parentCode: '2000' },
     { code: '2002', nameKey: 'account.payable',   type: AccountType.LIABILITY, parentCode: '2000' },
+    { code: '2003', nameKey: 'account.payrollPayable', type: AccountType.LIABILITY, parentCode: '2000' },
+    { code: '2004', nameKey: 'account.payrollTax',type: AccountType.LIABILITY, parentCode: '2000' },
+    { code: '2005', nameKey: 'account.socialInsurance', type: AccountType.LIABILITY, parentCode: '2000' },
     { code: '3000', nameKey: 'account.equity',    type: AccountType.EQUITY,    parentId: null },
     { code: '4000', nameKey: 'account.revenue',   type: AccountType.REVENUE,   parentId: null },
     { code: '5000', nameKey: 'account.expense',   type: AccountType.EXPENSE,   parentId: null },
     { code: '5001', nameKey: 'account.cogs',      type: AccountType.EXPENSE,   parentCode: '5000' },
+    { code: '5002', nameKey: 'account.salaries',  type: AccountType.EXPENSE,   parentCode: '5000' },
   ]
   const noorAccounts = [
     { code: '1100', nameKey: 'account.assets',    type: AccountType.ASSET,     parentId: null },
@@ -187,10 +203,14 @@ async function main() {
     { code: '2100', nameKey: 'account.liabilities',type: AccountType.LIABILITY, parentId: null },
     { code: '2101', nameKey: 'account.salesTax',  type: AccountType.LIABILITY, parentCode: '2100' },
     { code: '2102', nameKey: 'account.payable',   type: AccountType.LIABILITY, parentCode: '2100' },
+    { code: '2103', nameKey: 'account.payrollPayable', type: AccountType.LIABILITY, parentCode: '2100' },
+    { code: '2104', nameKey: 'account.payrollTax',type: AccountType.LIABILITY, parentCode: '2100' },
+    { code: '2105', nameKey: 'account.socialInsurance', type: AccountType.LIABILITY, parentCode: '2100' },
     { code: '3100', nameKey: 'account.equity',    type: AccountType.EQUITY,    parentId: null },
     { code: '4100', nameKey: 'account.revenue',   type: AccountType.REVENUE,   parentId: null },
     { code: '5100', nameKey: 'account.expense',   type: AccountType.EXPENSE,   parentId: null },
     { code: '5101', nameKey: 'account.cogs',      type: AccountType.EXPENSE,   parentCode: '5100' },
+    { code: '5102', nameKey: 'account.salaries',  type: AccountType.EXPENSE,   parentCode: '5100' },
   ]
 
   async function seedChart(tenantId: string, accounts: Array<{ code: string; nameKey: string; type: AccountType; parentId?: string | null; parentCode?: string }>) {
@@ -249,6 +269,31 @@ async function main() {
       update: { nameKey: p.nameKey, sellPrice: p.sellPrice },
       create: { tenantId: 'tenant-noor', sku: p.sku, nameKey: p.nameKey, sellPrice: p.sellPrice, costPrice: 0 },
     })
+  }
+
+  // ---------- 5c. Employees (Phase 4) ----------
+  // Sample employees for tenant-afak (tenant-noor has none — to keep isolation tests simple)
+  const afakEmployees = [
+    { fullName: 'أحمد محمد علي',    nationalId: '29301010100001', hireDate: new Date('2023-01-15'), baseSalary: 12000 },
+    { fullName: 'فاطمة حسن إبراهيم', nationalId: '29402020200002', hireDate: new Date('2023-03-01'), baseSalary: 8500 },
+    { fullName: 'خالد سعيد عبد الله', nationalId: '29503030300003', hireDate: new Date('2023-06-10'), baseSalary: 15000 },
+  ]
+  for (const emp of afakEmployees) {
+    // Use nationalId as a pseudo-unique key for upsert (nationalId is not unique in schema,
+    // but we use it here just for seed idempotency within a tenant)
+    const existing = await prisma.employee.findFirst({
+      where: { tenantId: 'tenant-afak', nationalId: emp.nationalId },
+    })
+    if (!existing) {
+      await prisma.employee.create({
+        data: { tenantId: 'tenant-afak', ...emp },
+      })
+    } else {
+      await prisma.employee.update({
+        where: { id: existing.id },
+        data: { fullName: emp.fullName, hireDate: emp.hireDate, baseSalary: emp.baseSalary },
+      })
+    }
   }
 
   // ---------- 6. Translations ----------
@@ -754,6 +799,117 @@ async function main() {
     { key: 'invoice.channel.POS',    locale: 'ar-EG', value: 'نقطة بيع' },
     { key: 'invoice.channel.POS',    locale: 'ar-SA', value: 'نقطة بيع' },
     { key: 'invoice.channel.POS',    locale: 'en',    value: 'POS' },
+
+    // HR & Payroll (Phase 4)
+    { key: 'nav.hr',             locale: 'ar-EG', value: 'الموارد البشرية' },
+    { key: 'nav.hr',             locale: 'ar-SA', value: 'الموارد البشرية' },
+    { key: 'nav.hr',             locale: 'en',    value: 'Human Resources' },
+    { key: 'nav.payroll',        locale: 'ar-EG', value: 'الرواتب' },
+    { key: 'nav.payroll',        locale: 'ar-SA', value: 'الرواتب' },
+    { key: 'nav.payroll',        locale: 'en',    value: 'Payroll' },
+    { key: 'hr.title',           locale: 'ar-EG', value: 'الموظفون' },
+    { key: 'hr.title',           locale: 'ar-SA', value: 'الموظفون' },
+    { key: 'hr.title',           locale: 'en',    value: 'Employees' },
+    { key: 'hr.fullName',        locale: 'ar-EG', value: 'الاسم الكامل' },
+    { key: 'hr.fullName',        locale: 'ar-SA', value: 'الاسم الكامل' },
+    { key: 'hr.fullName',        locale: 'en',    value: 'Full Name' },
+    { key: 'hr.hireDate',        locale: 'ar-EG', value: 'تاريخ التعيين' },
+    { key: 'hr.hireDate',        locale: 'ar-SA', value: 'تاريخ التعيين' },
+    { key: 'hr.hireDate',        locale: 'en',    value: 'Hire Date' },
+    { key: 'hr.baseSalary',      locale: 'ar-EG', value: 'الراتب الأساسي' },
+    { key: 'hr.baseSalary',      locale: 'ar-SA', value: 'الراتب الأساسي' },
+    { key: 'hr.baseSalary',      locale: 'en',    value: 'Base Salary' },
+    { key: 'hr.status',          locale: 'ar-EG', value: 'الحالة' },
+    { key: 'hr.status',          locale: 'ar-SA', value: 'الحالة' },
+    { key: 'hr.status',          locale: 'en',    value: 'Status' },
+    { key: 'hr.createEmployee',  locale: 'ar-EG', value: 'موظف جديد' },
+    { key: 'hr.createEmployee',  locale: 'ar-SA', value: 'موظف جديد' },
+    { key: 'hr.createEmployee',  locale: 'en',    value: 'New Employee' },
+    { key: 'hr.empty',           locale: 'ar-EG', value: 'لا يوجد موظفون' },
+    { key: 'hr.empty',           locale: 'ar-SA', value: 'لا يوجد موظفون' },
+    { key: 'hr.empty',           locale: 'en',    value: 'No employees' },
+    { key: 'hr.configError',     locale: 'ar-EG', value: 'خطأ في إعداد حسابات الرواتب' },
+    { key: 'hr.configError',     locale: 'ar-SA', value: 'خطأ في إعداد حسابات الرواتب' },
+    { key: 'hr.configError',     locale: 'en',    value: 'Payroll accounts not configured' },
+    { key: 'hr.salaryHidden',    locale: 'ar-EG', value: 'مخفي (لا تملك صلاحية)' },
+    { key: 'hr.salaryHidden',    locale: 'ar-SA', value: 'مخفي (لا تملك صلاحية)' },
+    { key: 'hr.salaryHidden',    locale: 'en',    value: 'Hidden (no permission)' },
+    { key: 'hr.status.ACTIVE',    locale: 'ar-EG', value: 'نشط' },
+    { key: 'hr.status.ACTIVE',    locale: 'ar-SA', value: 'نشط' },
+    { key: 'hr.status.ACTIVE',    locale: 'en',    value: 'Active' },
+    { key: 'hr.status.SUSPENDED', locale: 'ar-EG', value: 'موقوف' },
+    { key: 'hr.status.SUSPENDED', locale: 'ar-SA', value: 'موقوف' },
+    { key: 'hr.status.SUSPENDED', locale: 'en',    value: 'Suspended' },
+    { key: 'hr.status.TERMINATED',locale: 'ar-EG', value: 'منتهي' },
+    { key: 'hr.status.TERMINATED',locale: 'ar-SA', value: 'منتهي' },
+    { key: 'hr.status.TERMINATED',locale: 'en',    value: 'Terminated' },
+
+    // Payroll
+    { key: 'payroll.title',      locale: 'ar-EG', value: 'تشغيل الرواتب' },
+    { key: 'payroll.title',      locale: 'ar-SA', value: 'تشغيل الرواتب' },
+    { key: 'payroll.title',      locale: 'en',    value: 'Payroll Runs' },
+    { key: 'payroll.period',     locale: 'ar-EG', value: 'الفترة' },
+    { key: 'payroll.period',     locale: 'ar-SA', value: 'الفترة' },
+    { key: 'payroll.period',     locale: 'en',    value: 'Period' },
+    { key: 'payroll.status',     locale: 'ar-EG', value: 'الحالة' },
+    { key: 'payroll.status',     locale: 'ar-SA', value: 'الحالة' },
+    { key: 'payroll.status',     locale: 'en',    value: 'Status' },
+    { key: 'payroll.create',     locale: 'ar-EG', value: 'تشغيل رواتب شهر' },
+    { key: 'payroll.create',     locale: 'ar-SA', value: 'تشغيل رواتب شهر' },
+    { key: 'payroll.create',     locale: 'en',    value: 'Run Payroll' },
+    { key: 'payroll.post',       locale: 'ar-EG', value: 'ترحيل' },
+    { key: 'payroll.post',       locale: 'ar-SA', value: 'ترحيل' },
+    { key: 'payroll.post',       locale: 'en',    value: 'Post' },
+    { key: 'payroll.posted',     locale: 'ar-EG', value: 'تم ترحيل الرواتب بنجاح' },
+    { key: 'payroll.posted',     locale: 'ar-SA', value: 'تم ترحيل الرواتب بنجاح' },
+    { key: 'payroll.posted',     locale: 'en',    value: 'Payroll posted to ledger' },
+    { key: 'payroll.empty',      locale: 'ar-EG', value: 'لا توجد تشغيلات رواتب' },
+    { key: 'payroll.empty',      locale: 'ar-SA', value: 'لا توجد تشغيلات رواتب' },
+    { key: 'payroll.empty',      locale: 'en',    value: 'No payroll runs' },
+    { key: 'payroll.notFound',   locale: 'ar-EG', value: 'تشغيل الرواتب غير موجود' },
+    { key: 'payroll.notFound',   locale: 'ar-SA', value: 'تشغيل الرواتب غير موجود' },
+    { key: 'payroll.notFound',   locale: 'en',    value: 'Payroll run not found' },
+    { key: 'payroll.cannotModify',locale: 'ar-EG', value: 'لا يمكن تعديل رواتب مرحّلة' },
+    { key: 'payroll.cannotModify',locale: 'ar-SA', value: 'لا يمكن تعديل رواتب مرحّلة' },
+    { key: 'payroll.cannotModify',locale: 'en',    value: 'Cannot modify a posted payroll run' },
+    { key: 'payroll.status.DRAFT',  locale: 'ar-EG', value: 'مسودة' },
+    { key: 'payroll.status.DRAFT',  locale: 'ar-SA', value: 'مسودة' },
+    { key: 'payroll.status.DRAFT',  locale: 'en',    value: 'Draft' },
+    { key: 'payroll.status.POSTED', locale: 'ar-EG', value: 'مرحّلة' },
+    { key: 'payroll.status.POSTED', locale: 'ar-SA', value: 'مرحّلة' },
+    { key: 'payroll.status.POSTED', locale: 'en',    value: 'Posted' },
+    { key: 'payroll.employees',  locale: 'ar-EG', value: 'الموظفون' },
+    { key: 'payroll.employees',  locale: 'ar-SA', value: 'الموظفون' },
+    { key: 'payroll.employees',  locale: 'en',    value: 'Employees' },
+    { key: 'payroll.grossTotal', locale: 'ar-EG', value: 'إجمالي الرواتب' },
+    { key: 'payroll.grossTotal', locale: 'ar-SA', value: 'إجمالي الرواتب' },
+    { key: 'payroll.grossTotal', locale: 'en',    value: 'Gross Total' },
+    { key: 'payroll.netTotal',   locale: 'ar-EG', value: 'إجمالي الصافي' },
+    { key: 'payroll.netTotal',   locale: 'ar-SA', value: 'إجمالي الصافي' },
+    { key: 'payroll.netTotal',   locale: 'en',    value: 'Net Total' },
+    { key: 'payroll.taxTotal',   locale: 'ar-EG', value: 'إجمالي الضريبة' },
+    { key: 'payroll.taxTotal',   locale: 'ar-SA', value: 'إجمالي الضريبة' },
+    { key: 'payroll.taxTotal',   locale: 'en',    value: 'Tax Total' },
+    { key: 'payroll.insuranceTotal', locale: 'ar-EG', value: 'إجمالي التأمينات' },
+    { key: 'payroll.insuranceTotal', locale: 'ar-SA', value: 'إجمالي التأمينات' },
+    { key: 'payroll.insuranceTotal', locale: 'en',    value: 'Insurance Total' },
+    { key: 'payroll.monthLabel', locale: 'ar-EG', value: 'الشهر (YYYY-MM)' },
+    { key: 'payroll.monthLabel', locale: 'ar-SA', value: 'الشهر (YYYY-MM)' },
+    { key: 'payroll.monthLabel', locale: 'en',    value: 'Month (YYYY-MM)' },
+
+    // Payroll account names
+    { key: 'account.salaries',        locale: 'ar-EG', value: 'مصروف الرواتب' },
+    { key: 'account.salaries',        locale: 'ar-SA', value: 'مصروف الرواتب' },
+    { key: 'account.salaries',        locale: 'en',    value: 'Salaries Expense' },
+    { key: 'account.payrollPayable',  locale: 'ar-EG', value: 'رواتب مستحقة الدفع' },
+    { key: 'account.payrollPayable',  locale: 'ar-SA', value: 'رواتب مستحقة الدفع' },
+    { key: 'account.payrollPayable',  locale: 'en',    value: 'Payroll Payable' },
+    { key: 'account.payrollTax',      locale: 'ar-EG', value: 'ضريبة دخل مستقطعة مستحقة' },
+    { key: 'account.payrollTax',      locale: 'ar-SA', value: 'ضريبة دخل مستقطعة مستحقة' },
+    { key: 'account.payrollTax',      locale: 'en',    value: 'Payroll Tax Payable' },
+    { key: 'account.socialInsurance', locale: 'ar-EG', value: 'تأمينات اجتماعية مستحقة' },
+    { key: 'account.socialInsurance', locale: 'ar-SA', value: 'تأمينات اجتماعية مستحقة' },
+    { key: 'account.socialInsurance', locale: 'en',    value: 'Social Insurance Payable' },
 
     // Tests
     { key: 'tests.title',        locale: 'ar-EG', value: 'اختبارات العزل والتوازن' },

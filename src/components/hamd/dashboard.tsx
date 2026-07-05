@@ -10,7 +10,7 @@ import { useI18n } from '@/core/i18n/client'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { BookOpen, FileText, ShieldCheck, LogOut, User as UserIcon, Building2, Receipt, BarChart3, Package, ShoppingCart, Monitor } from 'lucide-react'
+import { BookOpen, FileText, ShieldCheck, LogOut, User as UserIcon, Building2, Receipt, BarChart3, Package, ShoppingCart, Monitor, Users, Wallet } from 'lucide-react'
 import { LanguageSwitcher } from './language-switcher'
 import { AccountsPanel } from './accounts-panel'
 import { JournalPanel } from './journal-panel'
@@ -20,6 +20,8 @@ import { IncomeStatementPanel } from './income-statement-panel'
 import { InventoryPanel } from './inventory-panel'
 import { PurchaseOrdersPanel } from './purchase-orders-panel'
 import { PosPanel } from './pos-panel'
+import { EmployeesPanel } from './employees-panel'
+import { PayrollPanel } from './payroll-panel'
 import type { Locale } from '@/core/i18n/locales'
 
 interface Props {
@@ -37,7 +39,7 @@ interface Props {
   onLogout: () => void
 }
 
-type Section = 'accounts' | 'journal' | 'invoices' | 'pos' | 'inventory' | 'purchases' | 'reports' | 'tests'
+type Section = 'pos' | 'accounts' | 'journal' | 'invoices' | 'inventory' | 'purchases' | 'hr' | 'payroll' | 'reports' | 'tests'
 
 export function Dashboard({ user, locale, onLocaleChange, onLogout }: Props) {
   const { t } = useI18n()
@@ -50,6 +52,8 @@ export function Dashboard({ user, locale, onLocaleChange, onLogout }: Props) {
     { key: 'invoices',   label: t('nav.invoices'),   icon: Receipt,        permitted: user.permissionKeys.includes('invoice:read') },
     { key: 'inventory',  label: t('nav.inventory'),  icon: Package,        permitted: user.permissionKeys.includes('inventory:read') },
     { key: 'purchases',  label: t('nav.purchases'),  icon: ShoppingCart,   permitted: user.permissionKeys.includes('inventory:read') },
+    { key: 'hr',         label: t('nav.hr'),         icon: Users,          permitted: user.permissionKeys.includes('hr:read') },
+    { key: 'payroll',    label: t('nav.payroll'),    icon: Wallet,         permitted: user.permissionKeys.includes('hr:read') },
     { key: 'reports',    label: t('nav.reports'),    icon: BarChart3,      permitted: user.permissionKeys.includes('journal:read') },
     { key: 'tests',      label: t('nav.tests'),      icon: ShieldCheck,    permitted: true },
   ]
@@ -151,6 +155,15 @@ export function Dashboard({ user, locale, onLocaleChange, onLogout }: Props) {
               canReceive={user.permissionKeys.includes('purchase:receive')}
             />
           )}
+          {section === 'hr' && (
+            <EmployeesPanel
+              canManage={user.permissionKeys.includes('hr:manage')}
+              canReadSalary={user.permissionKeys.includes('hr:salary:read')}
+            />
+          )}
+          {section === 'payroll' && (
+            <PayrollPanel canRun={user.permissionKeys.includes('payroll:run')} />
+          )}
           {section === 'reports' && <IncomeStatementPanel />}
           {section === 'tests' && <TestsPanel />}
         </main>
@@ -158,7 +171,7 @@ export function Dashboard({ user, locale, onLocaleChange, onLogout }: Props) {
 
       <footer className="border-t border-border bg-surface mt-auto">
         <div className="px-4 py-3 text-center text-xs text-muted-foreground">
-          H.A.M.D ERP · Phase 3 (POS) · {user.tenantId}
+          H.A.M.D ERP · Phase 4 (HR & Payroll) · {user.tenantId}
         </div>
       </footer>
     </div>
