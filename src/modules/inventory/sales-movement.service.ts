@@ -34,10 +34,14 @@ import type { StockMovement, Prisma } from '@prisma/client'
 const INVENTORY_NAME_KEY = 'account.inventory'
 const COGS_NAME_KEY = 'account.cogs'
 
-async function resolveSaleAccounts() {
+async function resolveSaleAccounts(
+  client: Prisma.TransactionClient | typeof db = db,
+  tenantId?: string
+) {
+  const where = (nameKey: string) => tenantId ? { nameKey, tenantId } : { nameKey }
   const [inventory, cogs] = await Promise.all([
-    db.account.findFirst({ where: { nameKey: INVENTORY_NAME_KEY } }),
-    db.account.findFirst({ where: { nameKey: COGS_NAME_KEY } }),
+    (client as typeof db).account.findFirst({ where: where(INVENTORY_NAME_KEY) }),
+    (client as typeof db).account.findFirst({ where: where(COGS_NAME_KEY) }),
   ])
   if (!inventory || !cogs) {
     throw new InventoryConfigError(
@@ -60,24 +64,26 @@ export interface SaleResult {
 /**
  * Record a sale: decrease stock + create COGS journal entry.
  *
- * Parameters:
- *  - productId, warehouseId: the stock location
- *  - quantity: units sold (must be > 0)
- *  - sourceRefId: ID of the originating sale document (invoice ID, POS tx ID)
- *
- * Permission: inventory:adjust (a sale adjusts inventory). The revenue
- * side is handled by the invoice service with its own permission.
+ * Phase 3 atomicity fix: optional `tx` parameter. When provided:
+ *  - Skips permission check (caller — e.g. posSale — handles permissions)
+ *  - Uses tx for all reads + writes (with explicit tenantId)
+ *  - Does NOT start its own $transaction — runs inside the caller's tx
+ * When not provided: standalone behavior (permission check + own $transaction)
  *
  * Throws InsufficientStockError if the requested quantity exceeds
- * available stock — StockLevel is NOT changed in this case.
+ * available stock — StockLevel is NOT changed in this case. When inside
+ * a transaction, this throw causes the entire transaction to roll back.
  */
-export async function recordSale(input: {
-  productId: string
-  warehouseId: string
-  quantity: number
-  sourceRefId: string
-}): Promise<SaleResult> {
-  requirePermission('inventory:adjust')
+export async function recordSale(
+  input: {
+    productId: string
+    warehouseId: string
+    quantity: number
+    sourceRefId: string
+  },
+  tx?: Prisma.TransactionClient
+): Promise<SaleResult> {
+  if (!tx) requirePermission('inventory:adjust')
   const ctx = getTenantContext()
   if (!ctx) throw new Error('No tenant context')
 
@@ -85,9 +91,11 @@ export async function recordSale(input: {
     throw new Error('Sale quantity must be positive')
   }
 
-  // 1. Fetch the product to get the current costPrice (used for COGS)
-  const product = await db.product.findUnique({
-    where: { id: input.productId },
+  const client = tx ?? db
+
+  // 1. Fetch the product to get the current costPrice (explicit tenantId for tx)
+  const product = await (client as typeof db).product.findFirst({
+    where: { id: input.productId, tenantId: ctx.tenantId },
     select: { id: true, costPrice: true, nameKey: true },
   })
   if (!product) {
@@ -97,14 +105,15 @@ export async function recordSale(input: {
   const unitCost = Number(product.costPrice)
   const cogsAmount = Math.round(unitCost * input.quantity * 100) / 100
 
-  // 2. Resolve COGS + Inventory accounts
-  const { inventory: inventoryAccount, cogs: cogsAccount } = await resolveSaleAccounts()
+  // 2. Resolve COGS + Inventory accounts (pass client + tenantId for tx)
+  const { inventory: inventoryAccount, cogs: cogsAccount } = await resolveSaleAccounts(client, ctx.tenantId)
 
-  // 3. Atomic: record movement + create COGS JE
-  const result = await db.$transaction(async (tx) => {
-    // recordMovement checks sufficient stock INSIDE the transaction (avoids
-    // race conditions). If insufficient, it throws InsufficientStockError
-    // and the transaction rolls back — StockLevel is unchanged.
+  // 3. Record movement + create COGS JE.
+  //    When tx is provided: use it directly (we're inside the caller's tx).
+  //    When tx is NOT provided: start our own $transaction.
+  //    recordMovement already accepts tx? — it checks sufficient stock
+  //    INSIDE the transaction, so a failure rolls back everything.
+  const doSale = async (c: Prisma.TransactionClient): Promise<{ movement: StockMovement; journalEntryId: string }> => {
     const movement = await recordMovement(
       {
         productId: input.productId,
@@ -115,7 +124,7 @@ export async function recordSale(input: {
         sourceModule: 'sales',
         sourceRefId: input.sourceRefId,
       },
-      tx
+      c
     )
 
     // Create the COGS JournalEntry
@@ -129,16 +138,18 @@ export async function recordSale(input: {
         { accountId: inventoryAccount.id, debit: 0, credit: cogsAmount },
       ],
     }
-    const je = await createJournalEntryOn(tx, jeInput)
+    const je = await createJournalEntryOn(c, jeInput)
 
     // Link the movement to the JE
-    await tx.stockMovement.update({
+    await c.stockMovement.update({
       where: { id: movement.id },
       data: { journalEntryId: je.id },
     })
 
     return { movement, journalEntryId: je.id }
-  })
+  }
+
+  const result = tx ? await doSale(tx) : await db.$transaction(doSale)
 
   return {
     movement: result.movement,

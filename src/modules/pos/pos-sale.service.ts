@@ -4,19 +4,19 @@
  * Per /upload/pos.md: POS is an ORCHESTRATION layer on top of the existing
  * services from Phase 1 (invoice) and Phase 2 (inventory). It does NOT
  * rewrite any logic — it calls:
- *   - createInvoice (Phase 1) with channel: 'POS'
- *   - postInvoice (Phase 1) with debitAccountId: cashAccount.id
- *   - recordSale (Phase 2) for each line
+ *   - createInvoice (Phase 1) with channel: 'POS' + tx
+ *   - postInvoice (Phase 1) with debitAccountId: cashAccount.id + tx
+ *   - recordSale (Phase 2) for each line + tx
  *
- * Atomicity guarantee: stock sufficiency is pre-checked for ALL lines BEFORE
- * any write. If any line has insufficient stock, the entire sale is rejected
- * with zero side effects (no invoice, no stock movement, no JE).
+ * ATOMICITY (Phase 3 fix): ALL steps run inside a SINGLE db.$transaction().
+ * If ANY step fails (including the internal stock check in recordSale →
+ * recordMovement), the ENTIRE transaction rolls back — no invoice, no JE,
+ * no stock movement. This is the guarantee that was missing in the initial
+ * Phase 3 implementation (which used separate transactions per service).
  *
- * The pre-check is the primary safety mechanism. The existing services'
- * internal transactions handle their own atomicity. A race condition between
- * the pre-check and recordSale is theoretically possible but extremely
- * unlikely in a single-tenant POS context; recordSale's own internal stock
- * check is the secondary guard.
+ * The pre-check (step 1) is an optimization to fail fast BEFORE starting
+ * the transaction. The real atomicity guarantee comes from the single
+ * $transaction wrapping all writes.
  *
  * Payment: Phase 3 is CASH ONLY. The sale debits the Cash account (not AR)
  * by passing debitAccountId to postInvoice.
@@ -29,7 +29,7 @@ import { createInvoice, postInvoice, type InvoiceWithLines } from '@/modules/acc
 import { recordSale, type SaleResult } from '@/modules/inventory/sales-movement.service'
 import { getTaxProvider } from '@/core/ledger/tax-provider'
 import { InsufficientStockError, InventoryConfigError } from '@/lib/api'
-import type { Product, Warehouse } from '@prisma/client'
+import type { Prisma } from '@prisma/client'
 
 // ---------- Types ----------
 
@@ -76,19 +76,23 @@ async function resolveCashAccount() {
 /**
  * Execute a POS sale: create + post invoice, record stock movements + COGS.
  *
+ * ALL steps run inside a SINGLE db.$transaction() — if any step fails,
+ * the entire sale rolls back (no invoice, no JE, no stock movement).
+ *
  * Steps:
  *  1. requirePermission('pos:sell')
- *  2. Pre-check: for each line, fetch the product + its stock at the warehouse.
- *     If ANY line has insufficient stock, throw InsufficientStockError BEFORE
- *     any write — the entire sale is rejected atomically.
- *  3. Resolve the Cash account (POS debits Cash, not AR).
- *  4. Get the tenant's default tax rate from the TaxProvider.
- *  5. Create the invoice (DRAFT, channel: 'POS') via createInvoice.
- *  6. Post it immediately via postInvoice with debitAccountId = cash.
- *     → creates the revenue JE (Debit Cash, Credit Revenue + Tax).
- *  7. For each line, call recordSale.
- *     → creates StockMovement(SALE) + COGS JE (Debit COGS, Credit Inventory).
- *  8. Return the result with totals + profit.
+ *  2. Pre-check (read-only, outside the transaction): verify all products
+ *     exist + stock is sufficient. This is an optimization to fail fast
+ *     before starting the transaction. The REAL atomicity guarantee comes
+ *     from the single $transaction below.
+ *  3. Resolve the Cash account + get the default tax rate (reads, outside tx).
+ *  4. Start db.$transaction(tx => ...):
+ *     a. createInvoice({ channel: 'POS' }, tx) — Phase 1 service
+ *     b. postInvoice(id, { debitAccountId: cash }, tx) — Phase 1 service
+ *     c. For each line: recordSale({ ... }, tx) — Phase 2 service
+ *        (recordSale internally calls recordMovement which checks stock
+ *         sufficiency INSIDE the tx — a failure here rolls back everything)
+ *  5. Return the result with totals + profit.
  *
  * Permission: pos:sell.
  */
@@ -101,8 +105,11 @@ export async function posSale(input: PosSaleInput): Promise<PosSaleResult> {
     throw new Error('POS sale requires at least 1 line')
   }
 
-  // ---- 1. Pre-check: verify all products exist + stock is sufficient ----
-  // This is the atomicity guarantee: if any line fails, NO write happens.
+  // ---- 1. Pre-check (read-only, outside the transaction) ----
+  // This is an optimization to fail fast. The real safety comes from the
+  // single $transaction below — even if the pre-check passes but a
+  // mid-transaction failure occurs (e.g., line 1 reduces stock so line 2
+  // can't be fulfilled), the entire transaction rolls back.
   const productIds = Array.from(new Set(input.lines.map((l) => l.productId)))
   const products = await db.product.findMany({
     where: { id: { in: productIds } },
@@ -111,10 +118,13 @@ export async function posSale(input: PosSaleInput): Promise<PosSaleResult> {
     },
   })
 
-  // Build a map for quick lookup
   const productMap = new Map(products.map((p) => [p.id, p]))
 
-  // Verify all products exist + check stock for each line
+  // Verify all products exist + check stock for each line INDIVIDUALLY.
+  // NOTE: this does NOT aggregate quantities for the same product across
+  // lines — that's intentional. The per-line check here is a fast-fail
+  // optimization. The authoritative check happens inside the transaction
+  // via recordMovement, which sees the UPDATED stock after each line.
   for (const line of input.lines) {
     const product = productMap.get(line.productId)
     if (!product) {
@@ -132,10 +142,9 @@ export async function posSale(input: PosSaleInput): Promise<PosSaleResult> {
     }
   }
 
-  // ---- 2. Resolve the Cash account (POS debits Cash, not AR) ----
+  // ---- 2. Resolve Cash account + tax rate (reads, outside tx) ----
   const cashAccount = await resolveCashAccount()
 
-  // ---- 3. Get the tenant's default tax rate from the TaxProvider ----
   const tenant = await dbRaw.tenant.findUnique({
     where: { id: ctx.tenantId },
     select: { country: true },
@@ -144,19 +153,14 @@ export async function posSale(input: PosSaleInput): Promise<PosSaleResult> {
   if (!provider) {
     throw new InventoryConfigError(`No TaxProvider registered for country ${tenant?.country}`)
   }
-  // Use the provider to determine the default tax rate. We call calculateTax
-  // with a single line to extract the rate — but actually we just need the
-  // rate. For EG it's 0.14. We get it from the provider by calling
-  // calculateTax on a dummy line and reading the rate from the result.
+  // Extract the default tax rate from the provider
   const dummyTax = provider.calculateTax({
     countryCode: provider.countryCode,
     lines: [{ amount: 100, description: 'rate probe' }],
   })
   const defaultTaxRate = dummyTax.lines[0]?.rate ?? 0
 
-  // ---- 4. Create the invoice (DRAFT, channel: POS) ----
-  // Build invoice lines from the POS cart. Each line uses the product's
-  // sellPrice (from the POS input) as the amount, and the default tax rate.
+  // Build invoice lines from the POS cart
   const invoiceLines = input.lines.map((line) => {
     const product = productMap.get(line.productId)!
     return {
@@ -166,48 +170,67 @@ export async function posSale(input: PosSaleInput): Promise<PosSaleResult> {
     }
   })
 
-  const invoice = await createInvoice({
-    customerName: input.customerName,
-    date: new Date(),
-    lines: invoiceLines,
-    channel: 'POS',
+  // ---- 3. ATOMIC: all writes inside ONE transaction ----
+  // If any step fails, the ENTIRE transaction rolls back.
+  // - createInvoice fails → no invoice created
+  // - postInvoice fails → invoice creation rolls back too
+  // - recordSale for line N fails → invoice + posting + lines 1..N-1 all roll back
+  const txResult = await db.$transaction(async (tx: Prisma.TransactionClient) => {
+    // a. Create the invoice (DRAFT, channel: POS)
+    const invoice = await createInvoice({
+      customerName: input.customerName,
+      date: new Date(),
+      lines: invoiceLines,
+      channel: 'POS',
+    }, tx)
+
+    // b. Post the invoice immediately (debits Cash, not AR)
+    const posted = await postInvoice(invoice.id, {
+      debitAccountId: cashAccount.id,
+    }, tx)
+
+    // c. For each line, record the sale (stock movement + COGS JE)
+    //    recordSale → recordMovement checks stock sufficiency INSIDE this tx.
+    //    If line 2 fails (e.g., line 1 already reduced stock below line 2's
+    //    requested qty), the entire tx rolls back — no invoice, no JE, no movement.
+    const saleResults: SaleResult[] = []
+    let totalCogs = 0
+
+    for (const line of input.lines) {
+      const saleResult = await recordSale({
+        productId: line.productId,
+        warehouseId: input.warehouseId,
+        quantity: line.quantity,
+        sourceRefId: invoice.id,
+      }, tx)
+      saleResults.push(saleResult)
+      totalCogs += saleResult.cogsAmount
+    }
+
+    return {
+      invoice: posted.invoice,
+      revenueJournalEntryId: posted.journalEntryId,
+      tax: posted.tax,
+      saleResults,
+      totalCogs,
+    }
   })
 
-  // ---- 5. Post the invoice immediately (debits Cash, not AR) ----
-  const posted = await postInvoice(invoice.id, {
-    debitAccountId: cashAccount.id,
-  })
-
-  // ---- 6. For each line, record the sale (stock movement + COGS JE) ----
-  const saleResults: SaleResult[] = []
-  let totalCogs = 0
-
-  for (const line of input.lines) {
-    const saleResult = await recordSale({
-      productId: line.productId,
-      warehouseId: input.warehouseId,
-      quantity: line.quantity,
-      sourceRefId: invoice.id,
-    })
-    saleResults.push(saleResult)
-    totalCogs += saleResult.cogsAmount
-  }
-
-  // ---- 7. Compute totals + return ----
-  const totalRevenue = posted.tax.totalBase
-  const totalTax = posted.tax.totalTax
-  const totalAmount = posted.tax.total
-  const netProfit = Math.round((totalRevenue - totalCogs) * 100) / 100
+  // ---- 4. Compute totals + return ----
+  const totalRevenue = txResult.tax.totalBase
+  const totalTax = txResult.tax.totalTax
+  const totalAmount = txResult.tax.total
+  const netProfit = Math.round((totalRevenue - txResult.totalCogs) * 100) / 100
 
   return {
-    invoice: posted.invoice,
-    revenueJournalEntryId: posted.journalEntryId,
-    cogsJournalEntryIds: saleResults.map((s) => s.journalEntryId),
-    saleResults,
+    invoice: txResult.invoice,
+    revenueJournalEntryId: txResult.revenueJournalEntryId,
+    cogsJournalEntryIds: txResult.saleResults.map((s) => s.journalEntryId),
+    saleResults: txResult.saleResults,
     totalRevenue,
     totalTax,
     totalAmount,
-    totalCogs: Math.round(totalCogs * 100) / 100,
+    totalCogs: Math.round(txResult.totalCogs * 100) / 100,
     netProfit,
   }
 }

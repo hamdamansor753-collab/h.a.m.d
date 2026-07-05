@@ -816,6 +816,105 @@ export async function POST() {
       }
       results.push({ name: 'pos-tenant-isolation', passed: posIsolationPassed, details: posIsolationDetails })
 
+      // ---------------- Test 12: POS partial failure → full rollback (atomicity) ----------------
+      // This test proves the atomicity fix. It creates a scenario where:
+      //  - Line 1: valid product with stock S, sell qty Q1 (S >= Q1 → pre-check passes)
+      //  - Line 2: SAME product, sell qty Q2 where Q1 + Q2 > S
+      //  - The pre-check passes (each line individually sees stock S, and S >= Q1, S >= Q2)
+      //  - But inside the transaction, line 1's recordSale reduces stock to S-Q1,
+      //    then line 2's recordSale fails (S-Q1 < Q2 → InsufficientStockError)
+      //  - The ENTIRE transaction rolls back: no invoice, no JE, no stock movement
+      //
+      // With the OLD code (separate transactions), this would leave a PARTIAL STATE:
+      // invoice posted + line 1's COGS recorded + line 1's stock reduced,
+      // but no line 2. The new atomic code prevents this.
+      let posAtomicityPassed = false
+      let posAtomicityDetails: Record<string, unknown> = {}
+      try {
+        const products = await listProducts()
+        const warehouses = await listWarehouses()
+        if (products.length === 0 || warehouses.length === 0) {
+          throw new Error('No products or warehouses seeded')
+        }
+        const product = products[0]
+        const warehouse = warehouses[0]
+
+        // Get current stock
+        const stockBefore = await getStockLevel(product.id, warehouse.id)
+
+        // Only run this test if there's stock to work with
+        if (stockBefore < 2) {
+          throw new Error(`Need at least 2 units in stock for this test (current: ${stockBefore})`)
+        }
+
+        // Design the sale so each line individually passes the pre-check,
+        // but the combined quantity exceeds stock:
+        //   Line 1: qty = stockBefore (passes pre-check: stockBefore >= stockBefore)
+        //   Line 2: qty = stockBefore (passes pre-check: stockBefore >= stockBefore)
+        //   Combined: 2 × stockBefore > stockBefore → line 2 fails mid-transaction
+        const lineQty = stockBefore
+        const invoicesBefore = await listAllInvoices()
+        const movementsBefore = await listStockMovements(500)
+
+        let saleRejected = false
+        let saleError: string | null = null
+        try {
+          await posSale({
+            warehouseId: warehouse.id,
+            customerName: 'POS Atomicity Test (should fail)',
+            lines: [
+              { productId: product.id, quantity: lineQty, unitPrice: Number(product.sellPrice) },
+              { productId: product.id, quantity: lineQty, unitPrice: Number(product.sellPrice) },
+            ],
+          })
+          saleRejected = false
+        } catch (e) {
+          saleRejected = e instanceof InsufficientStockError
+          saleError = e instanceof Error ? e.name : 'unknown'
+        }
+
+        // Verify ZERO side effects (full rollback):
+        // 1. Stock unchanged
+        const stockAfter = await getStockLevel(product.id, warehouse.id)
+        const stockUnchanged = stockBefore === stockAfter
+
+        // 2. No new invoice created
+        const invoicesAfter = await listAllInvoices()
+        const invoiceCountUnchanged = invoicesBefore.length === invoicesAfter.length
+
+        // 3. No new stock movement created
+        const movementsAfter = await listStockMovements(500)
+        const movementCountUnchanged = movementsBefore.length === movementsAfter.length
+
+        // 4. No "Atomicity Test" invoice leaked
+        const leakedInvoice = invoicesAfter.find(
+          (inv) => inv.customerName === 'POS Atomicity Test (should fail)'
+        )
+        const noLeakedInvoice = !leakedInvoice
+
+        posAtomicityPassed = saleRejected && stockUnchanged && invoiceCountUnchanged && movementCountUnchanged && noLeakedInvoice
+        posAtomicityDetails = {
+          scenario: `2 lines × ${lineQty} units each (stock=${stockBefore}), combined=${lineQty * 2} > stock=${stockBefore}`,
+          stockBefore,
+          lineQty,
+          combinedQty: lineQty * 2,
+          saleRejected,
+          saleError,
+          stockAfter,
+          stockUnchanged,
+          invoicesBefore: invoicesBefore.length,
+          invoicesAfter: invoicesAfter.length,
+          invoiceCountUnchanged,
+          movementsBefore: movementsBefore.length,
+          movementsAfter: movementsAfter.length,
+          movementCountUnchanged,
+          noLeakedInvoice,
+        }
+      } catch (e) {
+        posAtomicityDetails = { error: e instanceof Error ? e.message : String(e) }
+      }
+      results.push({ name: 'pos-partial-failure-rollback', passed: posAtomicityPassed, details: posAtomicityDetails })
+
       return results
     })
 

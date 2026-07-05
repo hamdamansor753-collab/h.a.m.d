@@ -48,11 +48,15 @@ const AR_NAME_KEY = 'account.receivable'
 const REVENUE_NAME_KEY = 'account.revenue'
 const TAX_NAME_KEY = 'account.salesTax'
 
-async function resolvePostingAccounts() {
+async function resolvePostingAccounts(
+  client: Prisma.TransactionClient | typeof db = db,
+  tenantId?: string
+) {
+  const where = (nameKey: string) => tenantId ? { nameKey, tenantId } : { nameKey }
   const [ar, revenue, tax] = await Promise.all([
-    db.account.findFirst({ where: { nameKey: AR_NAME_KEY } }),
-    db.account.findFirst({ where: { nameKey: REVENUE_NAME_KEY } }),
-    db.account.findFirst({ where: { nameKey: TAX_NAME_KEY } }),
+    (client as typeof db).account.findFirst({ where: where(AR_NAME_KEY) }),
+    (client as typeof db).account.findFirst({ where: where(REVENUE_NAME_KEY) }),
+    (client as typeof db).account.findFirst({ where: where(TAX_NAME_KEY) }),
   ])
 
   if (!ar || !revenue || !tax) {
@@ -71,12 +75,15 @@ async function resolvePostingAccounts() {
  * Generate the next sequential invoice number for the current tenant.
  * Format: INV-0001, INV-0002, ...
  *
- * Phase 1 note: this counts existing invoices + 1. Deleted DRAFT invoices
- * can cause gaps (acknowledged in accounting.md). For ETA compliance, a
- * future phase will use a locked sequence table.
+ * Accepts an optional client (tx or db) + tenantId. When using tx, the
+ * tenantId MUST be passed explicitly (tx has no middleware).
  */
-async function nextInvoiceNumber(): Promise<string> {
-  const count = await db.invoice.count()
+async function nextInvoiceNumber(
+  client: Prisma.TransactionClient | typeof db = db,
+  tenantId?: string
+): Promise<string> {
+  const where = tenantId ? { tenantId } : {}
+  const count = await (client as typeof db).invoice.count({ where })
   const n = count + 1
   return `INV-${String(n).padStart(4, '0')}`
 }
@@ -113,22 +120,33 @@ export async function getInvoice(id: string): Promise<InvoiceWithDetails | null>
 
 /**
  * Create a new DRAFT invoice.
- * Permission: invoice:create.
+ * Permission: invoice:create (skipped when tx is provided — caller handles it).
  *
  * Phase 3 addition: optional `channel` parameter (defaults to MANUAL).
- * POS sales pass `channel: 'POS'` to mark the invoice as a POS sale.
- * This is purely additive — existing callers see no change.
+ * Phase 3 atomicity fix: optional `tx` parameter. When provided, the
+ * function runs inside the caller's transaction (no own permission check,
+ * uses tx with explicit tenantId). When not provided, uses db (with
+ * middleware) as before.
  */
-export async function createInvoice(input: {
-  customerName: string
-  date: Date
-  lines: Array<{ description: string; amount: number; taxRate?: number }>
-  channel?: 'MANUAL' | 'POS'
-}): Promise<InvoiceWithLines> {
-  requirePermission('invoice:create')
-  const number = await nextInvoiceNumber()
-  return db.invoice.create({
+export async function createInvoice(
+  input: {
+    customerName: string
+    date: Date
+    lines: Array<{ description: string; amount: number; taxRate?: number }>
+    channel?: 'MANUAL' | 'POS'
+  },
+  tx?: Prisma.TransactionClient
+): Promise<InvoiceWithLines> {
+  if (!tx) requirePermission('invoice:create')
+  const ctx = getTenantContext()
+  if (!ctx) throw new Error('No tenant context')
+
+  const client = tx ?? db
+  const number = await nextInvoiceNumber(client, ctx.tenantId)
+
+  return (client as typeof db).invoice.create({
     data: {
+      tenantId: ctx.tenantId, // explicit — required for tx, harmless for db
       number,
       customerName: input.customerName,
       date: input.date,
@@ -215,37 +233,29 @@ export async function deleteInvoice(id: string): Promise<void> {
 /**
  * Post a DRAFT invoice to the ledger.
  *
- * Steps (all atomic via db.$transaction):
- *  1. Verify DRAFT status.
- *  2. Resolve posting accounts (AR, Revenue, Tax) by nameKey convention.
- *  3. Calculate tax via getTaxProvider(tenantCountry) — NO direct tax math.
- *  4. Build a balanced JournalEntry input:
- *       Debit  {debitAccount} = total (base + tax)  [AR by default; Cash for POS]
- *       Credit Revenue = base
- *       Credit Tax    = tax
- *     (debit = base + tax === credit = base + tax → always balanced)
- *  5. Create the JE + update invoice status to POSTED in ONE transaction.
- *     Uses createJournalEntryOn(tx, ...) which reuses prepareJournalEntry
- *     from Phase 0 — no balance logic rewritten.
+ * Phase 3 atomicity fix: optional `tx` parameter. When provided:
+ *  - Skips permission check (caller — e.g. posSale — handles permissions)
+ *  - Uses tx for all reads + writes (with explicit tenantId)
+ *  - Does NOT start its own $transaction — runs inside the caller's tx
+ * When not provided: standalone behavior (permission check + own $transaction)
  *
- * Phase 3 addition: optional `debitAccountId` parameter. When provided
- * (by POS), it overrides the default AR account — POS debits Cash instead.
- * The default behavior (AR) is unchanged for existing callers.
- *
- * Permission: invoice:post.
+ * Permission: invoice:post (skipped when tx is provided).
  */
 export async function postInvoice(
   id: string,
-  options?: { debitAccountId?: string }
+  options?: { debitAccountId?: string },
+  tx?: Prisma.TransactionClient
 ): Promise<{ invoice: InvoiceWithLines; journalEntryId: string; tax: TaxResult }> {
-  requirePermission('invoice:post')
+  if (!tx) requirePermission('invoice:post')
 
   const ctx = getTenantContext()
   if (!ctx) throw new Error('No tenant context')
 
-  // 1. Fetch + verify DRAFT
-  const invoice = await db.invoice.findUnique({
-    where: { id },
+  const client = tx ?? db
+
+  // 1. Fetch + verify DRAFT (explicit tenantId for tx)
+  const invoice = await (client as typeof db).invoice.findUnique({
+    where: { id, tenantId: ctx.tenantId },
     include: { lines: true },
   })
   if (!invoice) throw new InvoiceStateError('NOT_DRAFT', 'Invoice not found')
@@ -256,9 +266,8 @@ export async function postInvoice(
     throw new InvoiceStateError('NOT_DRAFT', 'Cannot post invoice with no lines')
   }
 
-  // 2. Resolve accounts. Use the override (Cash for POS) if provided,
-  //    otherwise default to AR.
-  const { ar, revenue, tax: taxAccount } = await resolvePostingAccounts()
+  // 2. Resolve accounts (pass client + tenantId for tx)
+  const { ar, revenue, tax: taxAccount } = await resolvePostingAccounts(client, ctx.tenantId)
   const debitAccount = options?.debitAccountId ? { id: options.debitAccountId } : ar
 
   // 3. Get the tenant's country to select the TaxProvider
@@ -299,16 +308,13 @@ export async function postInvoice(
     ],
   }
 
-  // 6. Atomic: create JE + update invoice in one transaction.
-  //    NOTE: `tx` is a raw Prisma transaction client WITHOUT the tenant
-  //    middleware. We MUST include `tenantId` in every `where` clause to
-  //    prevent cross-tenant writes. The `createJournalEntryOn` function
-  //    includes `tenantId` in the JE data (see prepareJournalEntry).
-  const result = await db.$transaction(async (tx) => {
-    // Reuse Phase 0's prepareJournalEntry (balance check + account verify)
-    // then create on the tx client.
-    const je = await createJournalEntryOn(tx, jeInput)
-    const updated = await tx.invoice.update({
+  // 6. Create JE + update invoice.
+  //    When tx is provided: use it directly (we're inside the caller's tx).
+  //    When tx is NOT provided: start our own $transaction.
+  //    In both cases, tenantId is explicit in the where clause (tx has no middleware).
+  const doPost = async (c: Prisma.TransactionClient): Promise<{ invoice: InvoiceWithLines; journalEntryId: string }> => {
+    const je = await createJournalEntryOn(c, jeInput)
+    const updated = await c.invoice.update({
       where: { id, tenantId: ctx.tenantId },
       data: {
         status: 'POSTED',
@@ -317,8 +323,9 @@ export async function postInvoice(
       include: { lines: true },
     })
     return { invoice: updated, journalEntryId: je.id }
-  })
+  }
 
+  const result = tx ? await doPost(tx) : await db.$transaction(doPost)
   return { ...result, tax: taxResult }
 }
 
