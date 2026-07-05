@@ -1,0 +1,146 @@
+// ====================================================================
+// H.A.M.D ERP — Core Data Model (Phase 0)
+// Implements /upload/04-data-model.md verbatim.
+// ====================================================================
+// ENVIRONMENT NOTE:
+//   The architecture spec mandates PostgreSQL with native Row-Level
+//   Security. This sandbox runs SQLite (no native RLS). Tenant isolation
+//   is therefore enforced MANDATORILY via Prisma middleware that injects
+//   `tenant_id` from an AsyncLocalStorage session context on every query
+//   (see src/core/tenancy/middleware.ts). The middleware is fail-closed:
+//   if no tenant context is set, queries against tenant-scoped models are
+//   rejected. The PostgreSQL RLS migration (`ENABLE ROW LEVEL SECURITY`
+//   + `CREATE POLICY tenant_isolation`) is provided as a separate SQL
+//   file under prisma/sql/tenant_rls_postgres.sql for production cutover.
+// ====================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ================= CORE: TENANCY =================
+
+model Tenant {
+  id            String    @id @default(uuid())
+  name          String
+  defaultLocale String    @default("ar-EG")
+  country       String // "EG" | "SA" | "AE" — selects Tax Provider
+  createdAt     DateTime  @default(now())
+  users         User[]
+  accounts      Account[]
+  journalEntries JournalEntry[]
+}
+
+model User {
+  id              String     @id @default(uuid())
+  tenantId        String
+  tenant          Tenant     @relation(fields: [tenantId], references: [id])
+  email           String
+  name            String
+  // Hashed password (bcrypt). Never stored or logged in plaintext.
+  passwordHash    String
+  locale          String     @default("ar-EG")
+  roles           UserRole[]
+  createdAt       DateTime   @default(now())
+
+  @@unique([tenantId, email])
+  @@index([tenantId])
+}
+
+model Role {
+  id          String       @id @default(uuid())
+  name        String       @unique // "admin" | "accountant" | "viewer"
+  permissions Permission[]
+  users       UserRole[]
+}
+
+model Permission {
+  id     String @id @default(uuid())
+  key    String @unique // "account:read" | "journal:create" | ...
+  roles  Role[]
+}
+
+model UserRole {
+  userId String
+  roleId String
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role   Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+}
+
+// ================= CORE: LEDGER (Double-Entry) =================
+
+model Account {
+  // Chart of Accounts — tree-structured
+  id        String      @id @default(uuid())
+  tenantId  String
+  tenant    Tenant      @relation(fields: [tenantId], references: [id])
+  code      String // "1000", "1000.01" ...
+  nameKey   String // translation key — never raw text
+  type      AccountType
+  parentId  String?
+  parent    Account?    @relation("AccountHierarchy", fields: [parentId], references: [id])
+  children  Account[]   @relation("AccountHierarchy")
+  lines     JournalLine[]
+  createdAt DateTime    @default(now())
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+}
+
+enum AccountType {
+  ASSET
+  LIABILITY
+  EQUITY
+  REVENUE
+  EXPENSE
+}
+
+model JournalEntry {
+  // Every financial movement in the system lands here — no exceptions.
+  id           String        @id @default(uuid())
+  tenantId     String
+  tenant       Tenant        @relation(fields: [tenantId], references: [id])
+  date         DateTime
+  description  String
+  sourceModule String        // "accounting" | "inventory" | "pos" | "hr"
+  sourceRefId  String        // ID of the originating document in source module
+  lines        JournalLine[]
+  createdAt    DateTime      @default(now())
+
+  @@index([tenantId, date])
+}
+
+model JournalLine {
+  id             String       @id @default(uuid())
+  journalEntryId String
+  journalEntry   JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
+  accountId      String
+  account        Account      @relation(fields: [accountId], references: [id])
+  debit          Decimal      @default(0)
+  credit         Decimal      @default(0)
+
+  @@index([accountId])
+  @@index([journalEntryId])
+}
+// MANDATORY: SUM(debit) === SUM(credit) for every JournalEntry.
+// Enforced in service layer (src/core/ledger/journal-entry.service.ts)
+// BEFORE any DB write — see test in /api/tests/journal-balance.
+
+// ================= CORE: i18n =================
+
+model Translation {
+  id     String @id @default(uuid())
+  key    String // "invoice.title"
+  locale String // "ar-EG" | "ar-SA" | "en"
+  value  String
+
+  @@unique([key, locale])
+  @@index([locale])
+}

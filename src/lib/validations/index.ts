@@ -1,0 +1,52 @@
+/**
+ * Zod validation schemas for ALL user inputs that reach the service layer.
+ * Per /upload/05-security-baseline.md section 2: "every user input is
+ * validated by a Zod schema before reaching the service layer — no
+ * exceptions".
+ *
+ * Per /upload/05-security-baseline.md section 6: we use `.issues` (not
+ * `.errors`) when reading Zod results — this is the Zod 4 API.
+ */
+import { z } from 'zod'
+
+// ---------------- Auth ----------------
+export const loginSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(1).max(200),
+})
+
+// ---------------- Accounts ----------------
+export const accountTypeSchema = z.enum(['ASSET', 'LIABILITY', 'EQUITY', 'REVENUE', 'EXPENSE'])
+
+export const createAccountSchema = z.object({
+  code: z
+    .string()
+    .min(1)
+    .max(50)
+    .regex(/^[0-9]+(\.[0-9]+)*$/, 'code must be dot-separated digits'),
+  nameKey: z
+    .string()
+    .min(1)
+    .max(100)
+    .regex(/^[a-z0-9]+(\.[a-z0-9]+)+$/, 'nameKey must be a dotted translation key'),
+  type: accountTypeSchema,
+  parentId: z.string().uuid().optional().nullable(),
+})
+
+// ---------------- Journal ----------------
+export const journalLineInputSchema = z.object({
+  accountId: z.string().uuid(),
+  debit: z.string().or(z.number()).default(0),
+  credit: z.string().or(z.number()).default(0),
+})
+
+export const createJournalEntrySchema = z.object({
+  date: z.string().datetime(),
+  description: z.string().min(1).max(500),
+  sourceModule: z.enum(['accounting', 'inventory', 'pos', 'hr']).default('accounting'),
+  sourceRefId: z.string().min(1).max(100),
+  lines: z.array(journalLineInputSchema).min(2, 'a journal entry needs at least 2 lines'),
+})
+
+// ---------------- Locale ----------------
+export const localeSchema = z.enum(['ar-EG', 'ar-SA', 'en'])
