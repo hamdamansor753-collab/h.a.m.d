@@ -30,6 +30,12 @@ async function main() {
     'journal:void',
     'user:read',
     'tenant:manage',
+    // Phase 1: invoice + system:test
+    'invoice:create',
+    'invoice:read',
+    'invoice:post',
+    'invoice:void',
+    'system:test',
   ]
   const permissions = await Promise.all(
     permissionKeys.map((key) =>
@@ -46,19 +52,33 @@ async function main() {
   const roleDefs = [
     {
       name: 'admin',
-      perms: ['account:read', 'account:create', 'account:update', 'journal:read', 'journal:create', 'journal:void', 'user:read', 'tenant:manage'],
+      perms: [
+        'account:read', 'account:create', 'account:update',
+        'journal:read', 'journal:create', 'journal:void',
+        'user:read', 'tenant:manage',
+        'invoice:create', 'invoice:read', 'invoice:post', 'invoice:void',
+        'system:test',
+      ],
     },
     {
       name: 'accountant',
-      perms: ['account:read', 'account:create', 'account:update', 'journal:read', 'journal:create'],
+      perms: [
+        'account:read', 'account:create', 'account:update',
+        'journal:read', 'journal:create',
+        'invoice:create', 'invoice:read', 'invoice:post',
+      ],
     },
     {
       name: 'viewer',
-      perms: ['account:read', 'journal:read'],
+      perms: ['account:read', 'journal:read', 'invoice:read'],
     },
   ]
   const roles: Record<string, { id: string }> = {}
   for (const def of roleDefs) {
+    // Upsert the role, then sync permissions (connect new + disconnect stale).
+    // The `update: {}` pattern from Phase 0 did NOT reconnect permissions on
+    // existing roles — so adding invoice:* perms in Phase 1 would be silently
+    // ignored on re-seed. We now explicitly sync the permission set.
     const role = await prisma.role.upsert({
       where: { name: def.name },
       update: {},
@@ -68,6 +88,17 @@ async function main() {
       },
       include: { permissions: true },
     })
+    // Sync permissions: connect any that are missing.
+    const existingPermIds = new Set(role.permissions.map((p) => p.id))
+    const toConnect = def.perms.filter((k) => !existingPermIds.has(permByKey[k].id))
+    if (toConnect.length > 0) {
+      await prisma.role.update({
+        where: { id: role.id },
+        data: {
+          permissions: { connect: toConnect.map((k) => ({ id: permByKey[k].id })) },
+        },
+      })
+    }
     roles[def.name] = role
   }
 
@@ -121,7 +152,9 @@ async function main() {
     { code: '1000', nameKey: 'account.assets',    type: AccountType.ASSET,     parentId: null },
     { code: '1001', nameKey: 'account.cash',      type: AccountType.ASSET,     parentCode: '1000' },
     { code: '1002', nameKey: 'account.bank',      type: AccountType.ASSET,     parentCode: '1000' },
+    { code: '1003', nameKey: 'account.receivable', type: AccountType.ASSET,    parentCode: '1000' },
     { code: '2000', nameKey: 'account.liabilities',type: AccountType.LIABILITY, parentId: null },
+    { code: '2001', nameKey: 'account.salesTax',  type: AccountType.LIABILITY, parentCode: '2000' },
     { code: '3000', nameKey: 'account.equity',    type: AccountType.EQUITY,    parentId: null },
     { code: '4000', nameKey: 'account.revenue',   type: AccountType.REVENUE,   parentId: null },
     { code: '5000', nameKey: 'account.expense',   type: AccountType.EXPENSE,   parentId: null },
@@ -129,7 +162,9 @@ async function main() {
   const noorAccounts = [
     { code: '1100', nameKey: 'account.assets',    type: AccountType.ASSET,     parentId: null },
     { code: '1101', nameKey: 'account.cash',      type: AccountType.ASSET,     parentCode: '1100' },
+    { code: '1102', nameKey: 'account.receivable', type: AccountType.ASSET,    parentCode: '1100' },
     { code: '2100', nameKey: 'account.liabilities',type: AccountType.LIABILITY, parentId: null },
+    { code: '2101', nameKey: 'account.salesTax',  type: AccountType.LIABILITY, parentCode: '2100' },
     { code: '3100', nameKey: 'account.equity',    type: AccountType.EQUITY,    parentId: null },
     { code: '4100', nameKey: 'account.revenue',   type: AccountType.REVENUE,   parentId: null },
   ]
@@ -297,6 +332,146 @@ async function main() {
     { key: 'journal.cancel',     locale: 'ar-EG', value: 'إلغاء' },
     { key: 'journal.cancel',     locale: 'ar-SA', value: 'إلغاء' },
     { key: 'journal.cancel',     locale: 'en',    value: 'Cancel' },
+
+    // Invoice (Phase 1)
+    { key: 'nav.invoices',       locale: 'ar-EG', value: 'الفواتير' },
+    { key: 'nav.invoices',       locale: 'ar-SA', value: 'الفواتير' },
+    { key: 'nav.invoices',       locale: 'en',    value: 'Invoices' },
+    { key: 'nav.reports',        locale: 'ar-EG', value: 'التقارير' },
+    { key: 'nav.reports',        locale: 'ar-SA', value: 'التقارير' },
+    { key: 'nav.reports',        locale: 'en',    value: 'Reports' },
+    { key: 'invoice.title',      locale: 'ar-EG', value: 'الفواتير' },
+    { key: 'invoice.title',      locale: 'ar-SA', value: 'الفواتير' },
+    { key: 'invoice.title',      locale: 'en',    value: 'Invoices' },
+    { key: 'invoice.number',     locale: 'ar-EG', value: 'رقم الفاتورة' },
+    { key: 'invoice.number',     locale: 'ar-SA', value: 'رقم الفاتورة' },
+    { key: 'invoice.number',     locale: 'en',    value: 'Invoice No.' },
+    { key: 'invoice.customer',   locale: 'ar-EG', value: 'العميل' },
+    { key: 'invoice.customer',   locale: 'ar-SA', value: 'العميل' },
+    { key: 'invoice.customer',   locale: 'en',    value: 'Customer' },
+    { key: 'invoice.date',       locale: 'ar-EG', value: 'التاريخ' },
+    { key: 'invoice.date',       locale: 'ar-SA', value: 'التاريخ' },
+    { key: 'invoice.date',       locale: 'en',    value: 'Date' },
+    { key: 'invoice.status',     locale: 'ar-EG', value: 'الحالة' },
+    { key: 'invoice.status',     locale: 'ar-SA', value: 'الحالة' },
+    { key: 'invoice.status',     locale: 'en',    value: 'Status' },
+    { key: 'invoice.total',      locale: 'ar-EG', value: 'الإجمالي' },
+    { key: 'invoice.total',      locale: 'ar-SA', value: 'الإجمالي' },
+    { key: 'invoice.total',      locale: 'en',    value: 'Total' },
+    { key: 'invoice.create',     locale: 'ar-EG', value: 'فاتورة جديدة' },
+    { key: 'invoice.create',     locale: 'ar-SA', value: 'فاتورة جديدة' },
+    { key: 'invoice.create',     locale: 'en',    value: 'New Invoice' },
+    { key: 'invoice.edit',       locale: 'ar-EG', value: 'تعديل' },
+    { key: 'invoice.edit',       locale: 'ar-SA', value: 'تعديل' },
+    { key: 'invoice.edit',       locale: 'en',    value: 'Edit' },
+    { key: 'invoice.post',       locale: 'ar-EG', value: 'ترحيل' },
+    { key: 'invoice.post',       locale: 'ar-SA', value: 'ترحيل' },
+    { key: 'invoice.post',       locale: 'en',    value: 'Post' },
+    { key: 'invoice.void',       locale: 'ar-EG', value: 'إلغاء الفاتورة' },
+    { key: 'invoice.void',       locale: 'ar-SA', value: 'إلغاء الفاتورة' },
+    { key: 'invoice.void',       locale: 'en',    value: 'Void' },
+    { key: 'invoice.empty',      locale: 'ar-EG', value: 'لا توجد فواتير' },
+    { key: 'invoice.empty',      locale: 'ar-SA', value: 'لا توجد فواتير' },
+    { key: 'invoice.empty',      locale: 'en',    value: 'No invoices' },
+    { key: 'invoice.lines',      locale: 'ar-EG', value: 'بنود الفاتورة' },
+    { key: 'invoice.lines',      locale: 'ar-SA', value: 'بنود الفاتورة' },
+    { key: 'invoice.lines',      locale: 'en',    value: 'Invoice Lines' },
+    { key: 'invoice.description',locale: 'ar-EG', value: 'الوصف' },
+    { key: 'invoice.description',locale: 'ar-SA', value: 'الوصف' },
+    { key: 'invoice.description',locale: 'en',    value: 'Description' },
+    { key: 'invoice.amount',     locale: 'ar-EG', value: 'المبلغ' },
+    { key: 'invoice.amount',     locale: 'ar-SA', value: 'المبلغ' },
+    { key: 'invoice.amount',     locale: 'en',    value: 'Amount' },
+    { key: 'invoice.taxRate',    locale: 'ar-EG', value: 'نسبة الضريبة' },
+    { key: 'invoice.taxRate',    locale: 'ar-SA', value: 'نسبة الضريبة' },
+    { key: 'invoice.taxRate',    locale: 'en',    value: 'Tax Rate' },
+    { key: 'invoice.addLine',    locale: 'ar-EG', value: 'إضافة بند' },
+    { key: 'invoice.addLine',    locale: 'ar-SA', value: 'إضافة بند' },
+    { key: 'invoice.addLine',    locale: 'en',    value: 'Add line' },
+    { key: 'invoice.save',       locale: 'ar-EG', value: 'حفظ الفاتورة' },
+    { key: 'invoice.save',       locale: 'ar-SA', value: 'حفظ الفاتورة' },
+    { key: 'invoice.save',       locale: 'en',    value: 'Save invoice' },
+    { key: 'invoice.cancel',     locale: 'ar-EG', value: 'إلغاء' },
+    { key: 'invoice.cancel',     locale: 'ar-SA', value: 'إلغاء' },
+    { key: 'invoice.cancel',     locale: 'en',    value: 'Cancel' },
+    { key: 'invoice.posted',     locale: 'ar-EG', value: 'تم ترحيل الفاتورة بنجاح' },
+    { key: 'invoice.posted',     locale: 'ar-SA', value: 'تم ترحيل الفاتورة بنجاح' },
+    { key: 'invoice.posted',     locale: 'en',    value: 'Invoice posted to ledger' },
+    { key: 'invoice.voided',     locale: 'ar-EG', value: 'تم إلغاء الفاتورة بقيد عكسي' },
+    { key: 'invoice.voided',     locale: 'ar-SA', value: 'تم إلغاء الفاتورة بقيد عكسي' },
+    { key: 'invoice.voided',     locale: 'en',    value: 'Invoice voided with reversing entry' },
+    { key: 'invoice.created',    locale: 'ar-EG', value: 'تم إنشاء الفاتورة' },
+    { key: 'invoice.created',    locale: 'ar-SA', value: 'تم إنشاء الفاتورة' },
+    { key: 'invoice.created',    locale: 'en',    value: 'Invoice created' },
+    { key: 'invoice.updated',    locale: 'ar-EG', value: 'تم تحديث الفاتورة' },
+    { key: 'invoice.updated',    locale: 'ar-SA', value: 'تم تحديث الفاتورة' },
+    { key: 'invoice.updated',    locale: 'en',    value: 'Invoice updated' },
+    { key: 'invoice.cannotModify',locale: 'ar-EG', value: 'لا يمكن تعديل فاتورة مرحّلة أو ملغاة' },
+    { key: 'invoice.cannotModify',locale: 'ar-SA', value: 'لا يمكن تعديل فاتورة مرحّلة أو ملغاة' },
+    { key: 'invoice.cannotModify',locale: 'en',    value: 'Cannot modify a posted or voided invoice' },
+    { key: 'invoice.notFound',   locale: 'ar-EG', value: 'الفاتورة غير موجودة' },
+    { key: 'invoice.notFound',   locale: 'ar-SA', value: 'الفاتورة غير موجودة' },
+    { key: 'invoice.notFound',   locale: 'en',    value: 'Invoice not found' },
+    { key: 'invoice.configError',locale: 'ar-EG', value: 'خطأ في إعداد الحسابات المطلوبة للترحيل' },
+    { key: 'invoice.configError',locale: 'ar-SA', value: 'خطأ في إعداد الحسابات المطلوبة للترحيل' },
+    { key: 'invoice.configError',locale: 'en',    value: 'Posting accounts not configured' },
+    { key: 'invoice.baseTotal',  locale: 'ar-EG', value: 'إجمالي قبل الضريبة' },
+    { key: 'invoice.baseTotal',  locale: 'ar-SA', value: 'إجمالي قبل الضريبة' },
+    { key: 'invoice.baseTotal',  locale: 'en',    value: 'Subtotal' },
+    { key: 'invoice.taxTotal',   locale: 'ar-EG', value: 'إجمالي الضريبة' },
+    { key: 'invoice.taxTotal',   locale: 'ar-SA', value: 'إجمالي الضريبة' },
+    { key: 'invoice.taxTotal',   locale: 'en',    value: 'Tax Total' },
+    { key: 'invoice.grandTotal', locale: 'ar-EG', value: 'الإجمالي الكلي' },
+    { key: 'invoice.grandTotal', locale: 'ar-SA', value: 'الإجمالي الكلي' },
+    { key: 'invoice.grandTotal', locale: 'en',    value: 'Grand Total' },
+
+    // Invoice status labels
+    { key: 'invoice.status.DRAFT',  locale: 'ar-EG', value: 'مسودة' },
+    { key: 'invoice.status.DRAFT',  locale: 'ar-SA', value: 'مسودة' },
+    { key: 'invoice.status.DRAFT',  locale: 'en',    value: 'Draft' },
+    { key: 'invoice.status.POSTED', locale: 'ar-EG', value: 'مرحّلة' },
+    { key: 'invoice.status.POSTED', locale: 'ar-SA', value: 'مرحّلة' },
+    { key: 'invoice.status.POSTED', locale: 'en',    value: 'Posted' },
+    { key: 'invoice.status.VOID',   locale: 'ar-EG', value: 'ملغاة' },
+    { key: 'invoice.status.VOID',   locale: 'ar-SA', value: 'ملغاة' },
+    { key: 'invoice.status.VOID',   locale: 'en',    value: 'Void' },
+
+    // Account names (Phase 1 additions)
+    { key: 'account.receivable', locale: 'ar-EG', value: 'العملاء (ذمم مدينة)' },
+    { key: 'account.receivable', locale: 'ar-SA', value: 'العملاء (ذمم مدينة)' },
+    { key: 'account.receivable', locale: 'en',    value: 'Accounts Receivable' },
+    { key: 'account.salesTax',   locale: 'ar-EG', value: 'ضريبة القيمة المضافة المستحقة' },
+    { key: 'account.salesTax',   locale: 'ar-SA', value: 'ضريبة القيمة المضافة المستحقة' },
+    { key: 'account.salesTax',   locale: 'en',    value: 'Sales Tax Payable' },
+
+    // Income statement report
+    { key: 'report.incomeStatement',     locale: 'ar-EG', value: 'قائمة الدخل' },
+    { key: 'report.incomeStatement',     locale: 'ar-SA', value: 'قائمة الدخل' },
+    { key: 'report.incomeStatement',     locale: 'en',    value: 'Income Statement' },
+    { key: 'report.revenue',             locale: 'ar-EG', value: 'الإيرادات' },
+    { key: 'report.revenue',             locale: 'ar-SA', value: 'الإيرادات' },
+    { key: 'report.revenue',             locale: 'en',    value: 'Revenue' },
+    { key: 'report.expenses',            locale: 'ar-EG', value: 'المصروفات' },
+    { key: 'report.expenses',            locale: 'ar-SA', value: 'المصروفات' },
+    { key: 'report.expenses',            locale: 'en',    value: 'Expenses' },
+    { key: 'report.netIncome',           locale: 'ar-EG', value: 'صافي الدخل' },
+    { key: 'report.netIncome',           locale: 'ar-SA', value: 'صافي الدخل' },
+    { key: 'report.netIncome',           locale: 'en',    value: 'Net Income' },
+    { key: 'report.totalRevenue',        locale: 'ar-EG', value: 'إجمالي الإيرادات' },
+    { key: 'report.totalRevenue',        locale: 'ar-SA', value: 'إجمالي الإيرادات' },
+    { key: 'report.totalRevenue',        locale: 'en',    value: 'Total Revenue' },
+    { key: 'report.totalExpenses',       locale: 'ar-EG', value: 'إجمالي المصروفات' },
+    { key: 'report.totalExpenses',       locale: 'ar-SA', value: 'إجمالي المصروفات' },
+    { key: 'report.totalExpenses',       locale: 'en',    value: 'Total Expenses' },
+    { key: 'report.account',             locale: 'ar-EG', value: 'الحساب' },
+    { key: 'report.account',             locale: 'ar-SA', value: 'الحساب' },
+    { key: 'report.account',             locale: 'en',    value: 'Account' },
+    { key: 'report.balance',             locale: 'ar-EG', value: 'الرصيد' },
+    { key: 'report.balance',             locale: 'ar-SA', value: 'الرصيد' },
+    { key: 'report.balance',             locale: 'en',    value: 'Balance' },
+    { key: 'report.noData',              locale: 'ar-EG', value: 'لا توجد بيانات مالية' },
+    { key: 'report.noData',              locale: 'ar-SA', value: 'لا توجد بيانات مالية' },
+    { key: 'report.noData',              locale: 'en',    value: 'No financial data' },
 
     // Tests
     { key: 'tests.title',        locale: 'ar-EG', value: 'اختبارات العزل والتوازن' },

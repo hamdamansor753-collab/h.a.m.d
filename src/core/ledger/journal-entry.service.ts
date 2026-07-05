@@ -8,11 +8,18 @@
  *
  * The check runs in the service layer (not the DB) so the error is
  * raised before any row is created — no partial state, no cleanup needed.
+ *
+ * Phase 1 addition: `prepareJournalEntry` is exported so that the invoice
+ * service can reuse the SAME balance-check + account-verification logic
+ * inside a `db.$transaction()` (for atomic invoice posting). The public
+ * `createJournalEntry` function is unchanged in behavior — it delegates
+ * to `prepareJournalEntry` then creates on `db`.
  */
 import { db } from '@/lib/db'
 import { requirePermission } from '@/core/rbac'
+import { getTenantContext } from '@/core/tenancy/context'
 import { JournalBalanceError } from '@/lib/api'
-import type { Prisma } from '@prisma/client'
+import type { Prisma, PrismaClient } from '@prisma/client'
 
 export interface JournalEntryWithLines {
   id: string
@@ -28,6 +35,14 @@ export interface JournalEntryWithLines {
     debit: Prisma.Decimal
     credit: Prisma.Decimal
   }>
+}
+
+export interface JournalEntryInput {
+  date: Date
+  description: string
+  sourceModule: string
+  sourceRefId: string
+  lines: Array<{ accountId: string; debit: number; credit: number }>
 }
 
 /**
@@ -62,25 +77,32 @@ export async function listJournalEntries(limit = 50): Promise<JournalEntryWithLi
 }
 
 /**
- * Create a balanced journal entry.
- * Permission: journal:create.
+ * Prepare a journal entry for creation: balance check + account verification.
+ * Returns the Prisma `create` parameters (data + include) ready to be passed
+ * to `client.journalEntry.create(params)` where `client` is either `db` or
+ * a transaction client (`tx`).
  *
- * Steps:
- *  1. RBAC check (service-layer).
- *  2. Validate balance (sum debit === sum credit) — reject if not.
- *  3. Verify every line's accountId belongs to the current tenant
- *     (the Prisma middleware scopes the findMany, so accounts in other
- *     tenants simply won't appear — we reject if any are missing).
- *  4. Atomic create (JournalEntry + JournalLines) in a single transaction.
+ * IMPORTANT: includes `tenantId` explicitly in the data. This is required
+ * because transaction clients (`tx` from `db.$transaction`) do NOT have
+ * the tenant middleware installed — so `tenantId` must be in the data
+ * itself. When using `db` (which has the middleware), the middleware
+ * overwrites `tenantId` with the same value — no conflict.
  */
-export async function createJournalEntry(input: {
-  date: Date
-  description: string
-  sourceModule: string
-  sourceRefId: string
-  lines: Array<{ accountId: string; debit: number; credit: number }>
-}): Promise<JournalEntryWithLines> {
-  requirePermission('journal:create')
+export async function prepareJournalEntry(input: JournalEntryInput): Promise<{
+  data: {
+    tenantId: string
+    date: Date
+    description: string
+    sourceModule: string
+    sourceRefId: string
+    lines: { create: Array<{ accountId: string; debit: number; credit: number }> }
+  }
+  include: { lines: true }
+}> {
+  const ctx = getTenantContext()
+  if (!ctx) {
+    throw new JournalBalanceError('0', '0') // no tenant context
+  }
 
   // 1. Balance check BEFORE any DB write.
   assertBalanced(input.lines)
@@ -98,9 +120,9 @@ export async function createJournalEntry(input: {
     throw new JournalBalanceError('0', '0') // reused as a generic rejection
   }
 
-  // 3. Atomic write.
-  const created = await db.journalEntry.create({
+  return {
     data: {
+      tenantId: ctx.tenantId,
       date: input.date,
       description: input.description,
       sourceModule: input.sourceModule,
@@ -114,6 +136,39 @@ export async function createJournalEntry(input: {
       },
     },
     include: { lines: true },
-  })
+  }
+}
+
+/**
+ * Create a balanced journal entry.
+ * Permission: journal:create.
+ *
+ * Delegates to `prepareJournalEntry` for validation, then creates on `db`.
+ * The create is a single Prisma operation (entry + nested lines) which
+ * Prisma wraps in an implicit transaction.
+ */
+export async function createJournalEntry(input: JournalEntryInput): Promise<JournalEntryWithLines> {
+  requirePermission('journal:create')
+  const params = await prepareJournalEntry(input)
+  const created = await db.journalEntry.create(params)
+  return created as JournalEntryWithLines
+}
+
+/**
+ * Create a balanced journal entry on a specific Prisma client (either `db`
+ * or a transaction client `tx`). Used by `postInvoice` and `voidInvoice`
+ * to create the journal entry INSIDE the same transaction as the invoice
+ * status update — guaranteeing atomicity.
+ *
+ * Does NOT do a permission check — the caller (postInvoice/voidInvoice) is
+ * responsible for checking `invoice:post` / `invoice:void`. This is by
+ * design: the invoice service is the entry point, not the journal service.
+ */
+export async function createJournalEntryOn(
+  client: PrismaClient | Parameters<Parameters<PrismaClient['$transaction']>[0]>[0],
+  input: JournalEntryInput
+): Promise<JournalEntryWithLines> {
+  const params = await prepareJournalEntry(input)
+  const created = await client.journalEntry.create(params as Parameters<typeof client.journalEntry.create>[0])
   return created as JournalEntryWithLines
 }

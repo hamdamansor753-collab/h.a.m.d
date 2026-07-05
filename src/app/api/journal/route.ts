@@ -21,7 +21,7 @@ export async function GET() {
     const result = await withTenantContext(async () => {
       return listJournalEntries()
     })
-    if ('status' in result) return ok({ authenticated: false }, 401)
+    if (result.status === 401) return ok({ authenticated: false }, 401)
     return ok(result)
   } catch (err) {
     return mapError(err, 'en')
@@ -52,7 +52,7 @@ export async function POST(req: Request) {
     const result = await withTenantContext(async () => {
       return createJournalEntry(data)
     })
-    if ('status' in result) return ok({ authenticated: false }, 401)
+    if (result.status === 401) return ok({ authenticated: false }, 401)
     return ok(result, 201)
   } catch (err) {
     return mapError(err, 'en')

@@ -112,6 +112,7 @@ function getScopedClient(tenantId: string): PrismaClient {
       user: { $allOperations: makeScopedHandler('user', tenantId) },
       account: { $allOperations: makeScopedHandler('account', tenantId) },
       journalEntry: { $allOperations: makeScopedHandler('journalEntry', tenantId) },
+      invoice: { $allOperations: makeScopedHandler('invoice', tenantId) },
     },
   }) as unknown as PrismaClient
   scopedClientCache.set(tenantId, cached)
@@ -121,8 +122,12 @@ function getScopedClient(tenantId: string): PrismaClient {
 // ---------- The default `db` Proxy ----------
 
 // Delegate names that require tenant scoping. Any other delegate
-// (translation, role, permission, tenant) passes through to dbRaw.
-const TENANT_SCOPED_DELEGATES = new Set(['user', 'account', 'journalEntry'])
+// (translation, role, permission, tenant, invoiceLine, journalLine) passes
+// through to dbRaw. NOTE: invoiceLine and journalLine have NO tenantId
+// column — they inherit scope from their parent (Invoice / JournalEntry).
+// They must ONLY be accessed via nested include/create under their scoped
+// parent, never queried directly via db.invoiceLine / db.journalLine.
+const TENANT_SCOPED_DELEGATES = new Set(['user', 'account', 'journalEntry', 'invoice'])
 
 function createDbProxy(): PrismaClient {
   return new Proxy({} as PrismaClient, {

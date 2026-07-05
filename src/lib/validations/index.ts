@@ -50,3 +50,22 @@ export const createJournalEntrySchema = z.object({
 
 // ---------------- Locale ----------------
 export const localeSchema = z.enum(['ar-EG', 'ar-SA', 'en'])
+
+// ---------------- Invoices (Phase 1) ----------------
+export const invoiceLineSchema = z.object({
+  description: z.string().min(1).max(500),
+  amount: z.coerce.number().min(0),
+  taxRate: z.coerce.number().min(0).max(1).default(0),
+})
+
+export const createInvoiceSchema = z.object({
+  customerName: z.string().min(1).max(200),
+  date: z.string().datetime(),
+  lines: z.array(invoiceLineSchema).min(1, 'an invoice needs at least 1 line'),
+})
+
+export const updateInvoiceSchema = z.object({
+  customerName: z.string().min(1).max(200).optional(),
+  date: z.string().datetime().optional(),
+  lines: z.array(invoiceLineSchema).min(1).optional(),
+})

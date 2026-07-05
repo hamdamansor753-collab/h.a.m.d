@@ -16,7 +16,14 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { getToken } from 'next-auth/jwt'
 
-const PROTECTED_PREFIXES = ['/api/accounts', '/api/journal', '/api/tests', '/api/session']
+const PROTECTED_PREFIXES = [
+  '/api/accounts',
+  '/api/journal',
+  '/api/tests',
+  '/api/session',
+  '/api/invoices',
+  '/api/reports',
+]
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl

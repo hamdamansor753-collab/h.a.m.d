@@ -10,11 +10,13 @@ import { useI18n } from '@/core/i18n/client'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { BookOpen, FileText, ShieldCheck, LogOut, User as UserIcon, Building2 } from 'lucide-react'
+import { BookOpen, FileText, ShieldCheck, LogOut, User as UserIcon, Building2, Receipt, BarChart3 } from 'lucide-react'
 import { LanguageSwitcher } from './language-switcher'
 import { AccountsPanel } from './accounts-panel'
 import { JournalPanel } from './journal-panel'
 import { TestsPanel } from './tests-panel'
+import { InvoicesPanel } from './invoices-panel'
+import { IncomeStatementPanel } from './income-statement-panel'
 import type { Locale } from '@/core/i18n/locales'
 
 interface Props {
@@ -32,16 +34,18 @@ interface Props {
   onLogout: () => void
 }
 
-type Section = 'accounts' | 'journal' | 'tests'
+type Section = 'accounts' | 'journal' | 'invoices' | 'reports' | 'tests'
 
 export function Dashboard({ user, locale, onLocaleChange, onLogout }: Props) {
   const { t } = useI18n()
   const [section, setSection] = useState<Section>('accounts')
 
   const navItems: Array<{ key: Section; label: string; icon: typeof BookOpen; permitted: boolean }> = [
-    { key: 'accounts', label: t('nav.accounts'), icon: BookOpen,     permitted: user.permissionKeys.includes('account:read') },
-    { key: 'journal',  label: t('nav.journal'),  icon: FileText,     permitted: user.permissionKeys.includes('journal:read') },
-    { key: 'tests',    label: t('nav.tests'),     icon: ShieldCheck,  permitted: true },
+    { key: 'accounts',  label: t('nav.accounts'),  icon: BookOpen,     permitted: user.permissionKeys.includes('account:read') },
+    { key: 'journal',   label: t('nav.journal'),   icon: FileText,     permitted: user.permissionKeys.includes('journal:read') },
+    { key: 'invoices',  label: t('nav.invoices'),  icon: Receipt,      permitted: user.permissionKeys.includes('invoice:read') },
+    { key: 'reports',   label: t('nav.reports'),   icon: BarChart3,    permitted: user.permissionKeys.includes('journal:read') },
+    { key: 'tests',     label: t('nav.tests'),     icon: ShieldCheck,  permitted: true },
   ]
 
   return (
@@ -124,13 +128,21 @@ export function Dashboard({ user, locale, onLocaleChange, onLogout }: Props) {
         <main className="flex-1 p-4 sm:p-6 overflow-x-hidden">
           {section === 'accounts' && <AccountsPanel canCreate={user.permissionKeys.includes('account:create')} />}
           {section === 'journal' && <JournalPanel canCreate={user.permissionKeys.includes('journal:create')} />}
+          {section === 'invoices' && (
+            <InvoicesPanel
+              canCreate={user.permissionKeys.includes('invoice:create')}
+              canPost={user.permissionKeys.includes('invoice:post')}
+              canVoid={user.permissionKeys.includes('invoice:void')}
+            />
+          )}
+          {section === 'reports' && <IncomeStatementPanel />}
           {section === 'tests' && <TestsPanel />}
         </main>
       </div>
 
       <footer className="border-t border-border bg-surface mt-auto">
         <div className="px-4 py-3 text-center text-xs text-muted-foreground">
-          H.A.M.D ERP · Phase 0 (Core) · {user.tenantId}
+          H.A.M.D ERP · Phase 1 (Accounting) · {user.tenantId}
         </div>
       </footer>
     </div>

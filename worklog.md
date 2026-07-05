@@ -78,3 +78,38 @@ Stage Summary:
 - Login session now persists correctly through the preview panel (HTTPS + cross-origin iframe context)
 - The SameSite=None; Secure combination is required for any iframe-embedded app and is the standard NextAuth-behind-proxy configuration
 - No changes to the tenancy/auth/RBAC logic — only cookie/transport configuration
+
+---
+Task ID: 14-26
+Agent: main-orchestrator
+Task: Phase 1 — Accounting & Invoicing module + Phase 0 /api/tests fix
+
+Work Log:
+- Phase 0 fix: added `system:test` permission (admin only) + `requirePermission('system:test')` at start of POST /api/tests
+- Fixed seed to sync permissions on re-seed (previous `update: {}` didn't connect new perms to existing roles)
+- Added Invoice, InvoiceLine, InvoiceStatus to Prisma schema (with @unique on journalEntryId + voidJournalEntryId for 1:1 relations)
+- Added `invoice` to tenant-scoped models in db.ts Proxy (invoiceLine stays unscoped — inherits via Invoice, like JournalLine via JournalEntry)
+- Implemented EgyptTaxProvider (14% VAT, per-line customizable rate, cent-precision rounding, placeholder for ETA XML)
+- Refactored journal-entry.service.ts: exported `prepareJournalEntry` (balance check + account verify + explicit tenantId) and `createJournalEntryOn(tx, ...)` for transaction-safe reuse
+- Critical fix: `prepareJournalEntry` now includes `tenantId` explicitly in data — required because `tx` inside `$transaction` has NO tenant middleware
+- Invoice service: createInvoice, updateInvoice (DRAFT only), deleteInvoice (DRAFT only), postInvoice (tax→balanced JE→atomic tx), voidInvoice (reversing JE)
+- postInvoice: uses getTaxProvider(tenantCountry) → calculateTax → builds balanced JE (debit AR=total, credit Revenue=base, credit Tax=tax) → createJournalEntryOn(tx) + tx.invoice.update in single $transaction
+- voidInvoice: creates reversing JE (debit↔credit swap) + updates status to VOID in single $transaction. Original JE stays for audit.
+- Income statement service: fetches all JournalEntries (tenant-scoped) with lines+accounts, sums by AccountType (Revenue=credit-debit, Expense=debit-credit), returns net income
+- All API routes: runtime=nodejs, Zod-validated, auth+permission via withTenantContext, service-only Prisma
+- Critical bug fix: `'status' in result` false-positived on invoice objects (which have a `status` field) → changed to `result.status === 401` in ALL routes (accounts, journal, invoices, tests, reports)
+- Security fix: `tx.invoice.update` inside $transaction must include `tenantId` in `where` (tx has no middleware)
+- UI: invoices-panel (list + create/edit form with live totals + post/void buttons), income-statement-panel (revenue vs expenses vs net income), dashboard nav with 5 sections
+- Extended /api/tests with 3 Phase 1 tests (5 total): all PASS
+
+Stage Summary:
+- All 5 security tests PASS (verified via Agent Browser):
+  1. tenant-isolation: PASS (cross-tenant read=null, update=0, JE create blocked)
+  2. journal-balance: PASS (unbalanced rejected, balanced created+cleaned)
+  3. invoice-post-balanced: PASS (INV-0011 posted, JE found, debit=1710=credit, tax=210 correct)
+  4. posted-invoice-immutable: PASS (PATCH on POSTED rejected with InvoiceStateError)
+  5. invoice-tenant-isolation: PASS (cross-tenant read=null, post blocked, update blocked)
+- Invoice INV-0010 created via UI (customer=شركة النخبة, 2000+14% tax=2280), posted → JE appears in journal with balanced 2280=2280
+- Income statement shows Revenue 2100 (2000 from invoice + 100 from Phase 0 manual entry)
+- Lint clean, dev server running on port 3000
+- Files produced: ~15 new/modified files across prisma/, src/core/{tax,ledger,auth}/, src/modules/accounting/, src/app/api/{invoices,reports}/, src/components/hamd/

@@ -1,13 +1,12 @@
 /**
- * GET  /api/accounts         — list accounts for current tenant
- * POST /api/accounts         — create account
+ * GET  /api/invoices         — list invoices for current tenant
+ * POST /api/invoices         — create a new DRAFT invoice
  *
- * runtime = 'nodejs' (Prisma). All input via Zod. No direct Prisma calls —
- * everything goes through account.service.ts.
+ * runtime = 'nodejs' (Prisma). Zod-validated. Service-only Prisma.
  */
 import { withTenantContext } from '@/core/auth/session'
-import { listAccounts, createAccount, buildAccountTree } from '@/core/ledger/account.service'
-import { createAccountSchema } from '@/lib/validations'
+import { listInvoices, createInvoice } from '@/modules/accounting/invoice.service'
+import { createInvoiceSchema } from '@/lib/validations'
 import { ok, mapError, badRequest } from '@/lib/api'
 
 export const runtime = 'nodejs'
@@ -16,8 +15,7 @@ export const dynamic = 'force-dynamic'
 export async function GET() {
   try {
     const result = await withTenantContext(async () => {
-      const accounts = await listAccounts()
-      return { flat: accounts, tree: buildAccountTree(accounts) }
+      return listInvoices()
     })
     if (result.status === 401) return ok({ authenticated: false }, 401)
     return ok(result)
@@ -29,7 +27,7 @@ export async function GET() {
 export async function POST(req: Request) {
   try {
     const body = await req.json()
-    const parsed = createAccountSchema.safeParse(body)
+    const parsed = createInvoiceSchema.safeParse(body)
     if (!parsed.success) {
       return badRequest('en', 'common.error', parsed.error.issues.map((i) => ({
         path: i.path.join('.'),
@@ -37,8 +35,18 @@ export async function POST(req: Request) {
       })))
     }
     const result = await withTenantContext(async () => {
-      return createAccount(parsed.data)
+      return createInvoice({
+        customerName: parsed.data.customerName,
+        date: new Date(parsed.data.date),
+        lines: parsed.data.lines.map((l) => ({
+          description: l.description,
+          amount: l.amount,
+          taxRate: l.taxRate,
+        })),
+      })
     })
+    // NOTE: use `result.status === 401` not `'status' in result` — the invoice
+    // object has a `status` field (InvoiceStatus) that would false-positive.
     if (result.status === 401) return ok({ authenticated: false }, 401)
     return ok(result, 201)
   } catch (err) {
