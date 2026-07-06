@@ -36,6 +36,8 @@ const PROTECTED_PREFIXES = [
   '/api/customers',
   '/api/appointments',
   '/api/reminders',
+  // Phase 7: Branding
+  '/api/tenant',
 ]
 
 export async function middleware(req: NextRequest) {

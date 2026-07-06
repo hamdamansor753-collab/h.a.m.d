@@ -40,6 +40,9 @@ model Tenant {
   customers     Customer[]
   appointments  Appointment[]
   activityLogs  ActivityLog[]
+  // Phase 7: branding + business type
+  businessType  String       @default("general") // "general" | "retail" | "restaurant" | "clinic" | "services"
+  brandSettings BrandSettings?
 }
 
 model User {
@@ -443,4 +446,16 @@ model SequenceCounter {
   lastValue   Int      @default(0)
 
   @@id([tenantId, sequenceKey])
+}
+
+// ================= PHASE 7: BRANDING & BUSINESS TEMPLATES =================
+
+model BrandSettings {
+  tenantId          String   @id
+  tenant            Tenant   @relation(fields: [tenantId], references: [id])
+  logoUrl           String?
+  primaryColor      String   @default("#0f172a") // navy — H.A.M.D default
+  accentColor       String   @default("#06b6d4") // cyan — H.A.M.D default
+  invoiceFooterText String?  // custom text at bottom of invoices (terms, contact)
+  updatedAt         DateTime @updatedAt
 }

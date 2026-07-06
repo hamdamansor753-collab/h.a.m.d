@@ -38,6 +38,12 @@ const globalForPrisma = globalThis as unknown as {
 function createRawClient(): PrismaClient {
   return new PrismaClient({
     log: process.env.NODE_ENV === 'production' ? ['error'] : ['error', 'warn'],
+    // Supabase session-mode pooler has a 5s default transaction timeout.
+    // Increase to 30s for complex multi-step transactions (POS sale, PO receive, payroll).
+    transactionOptions: {
+      timeout: 30000,
+      maxWait: 10000,
+    },
   })
 }
 
