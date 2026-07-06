@@ -925,12 +925,26 @@ export async function POST() {
       // partial failure rollback, tenant isolation
       // =================================================================
 
+      // Clean up old test payroll runs (periods in year 3000+) to avoid
+      // @@unique constraint collisions from previous test runs.
+      await dbRaw.payrollRun.deleteMany({
+        where: { tenantId: ctx.tenantId, period: { startsWith: '3' } },
+      })
+      await dbRaw.payrollRun.deleteMany({
+        where: { tenantId: ctx.tenantId, period: { startsWith: '4' } },
+      })
+      await dbRaw.payrollRun.deleteMany({
+        where: { tenantId: ctx.tenantId, period: { startsWith: '9' } },
+      })
+
       // ---------------- Test 13: Payroll run → balanced JE ----------------
       let payrollPostPassed = false
       let payrollPostDetails: Record<string, unknown> = {}
       try {
-        // Use a unique period to avoid @@unique collision
-        const period = `9999-${String(Math.floor(Math.random() * 12) + 1).padStart(2, '0')}`
+        // Use a timestamp-based unique period to avoid @@unique collision.
+        // Year = 3000 + (ts % 6999) → 3000-9998, month = 01-12.
+        const ts = Date.now()
+        const period = `${3000 + (ts % 6999)}-${String((Math.floor(ts / 7000) % 12) + 1).padStart(2, '0')}`
 
         // Create the payroll run (gathers active employees, calculates via provider)
         const run = await createPayrollRun(period)
@@ -1030,8 +1044,9 @@ export async function POST() {
       let payrollImmutablePassed = false
       let payrollImmutableDetails: Record<string, unknown> = {}
       try {
-        // Create + post a payroll run
-        const period = `9998-${String(Math.floor(Math.random() * 12) + 1).padStart(2, '0')}`
+        // Create + post a payroll run — use a unique timestamp-based period
+        const ts2 = Date.now()
+        const period = `${4000 + (ts2 % 5999)}-${String((Math.floor(ts2 / 6000) % 12) + 1).padStart(2, '0')}`
         const run = await createPayrollRun(period)
         await postPayrollRun(run.id)
 

@@ -140,16 +140,26 @@ export async function createPayrollRun(period: string): Promise<PayrollRunWithLi
   })
 
   // 4. Create the PayrollRun + all PayrollLines
-  return db.payrollRun.create({
-    data: {
-      period,
-      status: 'DRAFT',
-      lines: {
-        create: lines,
+  //    Catch the @@unique([tenantId, period]) constraint violation and
+  //    throw a clear error instead of leaking the raw Prisma message.
+  try {
+    return await db.payrollRun.create({
+      data: {
+        period,
+        status: 'DRAFT',
+        lines: {
+          create: lines,
+        },
       },
-    },
-    include: { lines: true },
-  })
+      include: { lines: true },
+    })
+  } catch (err) {
+    // Prisma unique constraint error code P2002
+    if (err && typeof err === 'object' && 'code' in err && err.code === 'P2002') {
+      throw new PayrollStateError('ALREADY_POSTED', `A payroll run for period ${period} already exists`)
+    }
+    throw err
+  }
 }
 
 // ---------- Posting ----------
