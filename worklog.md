@@ -332,3 +332,28 @@ Stage Summary:
   26. rls-sql-complete: PASS — RLS SQL file covers all 14 tenant-scoped tables, has ENABLE+FORCE+POLICY
 - Lint clean
 - PostgreSQL migration steps documented in prisma/sql/tenant_rls_postgres.sql
+
+---
+Task ID: 85
+Agent: main-orchestrator
+Task: PostgreSQL migration to Supabase + RLS activation + verification
+
+Work Log:
+- Changed prisma/schema.prisma: provider = "postgresql", added directUrl = env("DIRECT_URL")
+- Configured .env with Supabase connection strings (pooler port 6543 for app, direct port 5432 for migrations)
+- Ran `bun run db:push` — all tables created on Supabase PostgreSQL successfully
+- Fixed RLS SQL: Prisma creates camelCase columns ("tenantId" not tenant_id) — updated all policies to use quoted camelCase names
+- Executed RLS SQL: 42 statements, 0 errors. 14 tables with RLS enabled + forced, 14 policies created
+- Ran seed on PostgreSQL: 2 tenants, 7 users, 5 roles, 31 accounts, 24 permissions, 374 translations
+- Fixed env loading: bun doesn't auto-load .env for scripts — added manual dotenv loading in seed.ts
+- Updated withTenantContext to SET LOCAL app.current_tenant_id for PostgreSQL RLS
+- Created hamd_app role (NOSUPERUSER, NOBYPASSRLS) for true RLS testing
+- All 26 tests PASS on PostgreSQL (verified via /api/tests)
+- RLS verified at database level: hamd_app without context sees 0 rows, with tenant-afak sees 5 users, with tenant-noor sees 2 users, cross-tenant INSERT blocked (error 42501)
+
+Stage Summary:
+- PostgreSQL (Supabase) is the active database
+- RLS is active and VERIFIED at the database level (not just application middleware)
+- All 26 tests PASS on PostgreSQL
+- Two layers of defense: (1) Prisma Proxy middleware (application), (2) PostgreSQL RLS (database)
+- Even if the application middleware is completely bypassed, the database itself rejects cross-tenant queries

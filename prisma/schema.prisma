@@ -1,17 +1,12 @@
 // ====================================================================
-// H.A.M.D ERP — Core Data Model (Phase 0)
-// Implements /upload/04-data-model.md verbatim.
+// H.A.M.D ERP — Core Data Model
+// Implements /upload/04-data-model.md + all phase additions.
 // ====================================================================
-// ENVIRONMENT NOTE:
-//   The architecture spec mandates PostgreSQL with native Row-Level
-//   Security. This sandbox runs SQLite (no native RLS). Tenant isolation
-//   is therefore enforced MANDATORILY via Prisma middleware that injects
-//   `tenant_id` from an AsyncLocalStorage session context on every query
-//   (see src/core/tenancy/middleware.ts). The middleware is fail-closed:
-//   if no tenant context is set, queries against tenant-scoped models are
-//   rejected. The PostgreSQL RLS migration (`ENABLE ROW LEVEL SECURITY`
-//   + `CREATE POLICY tenant_isolation`) is provided as a separate SQL
-//   file under prisma/sql/tenant_rls_postgres.sql for production cutover.
+// DATABASE:
+//   Production: PostgreSQL (Supabase) with native Row-Level Security.
+//   The RLS SQL file at prisma/sql/tenant_rls_postgres.sql enables
+//   RLS on all 14 tenant-scoped tables. The Prisma Proxy in db.ts
+//   is the FIRST isolation layer; RLS is the SECOND (defense in depth).
 // ====================================================================
 
 generator client {
@@ -19,8 +14,9 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 // ================= CORE: TENANCY =================

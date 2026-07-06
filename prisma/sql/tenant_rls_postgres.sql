@@ -1,6 +1,6 @@
 -- =====================================================================
 -- H.A.M.D ERP — PostgreSQL Row-Level Security Migration
--- PRODUCTION ONLY. Execute on the PostgreSQL database after running
+-- PRODUCTION. Execute on the PostgreSQL database after running
 -- `prisma db push` or `prisma migrate deploy`.
 --
 -- This enables RLS on EVERY tenant-scoped table and creates a policy
@@ -12,11 +12,12 @@
 -- With RLS enabled + FORCE, even if the application middleware is
 -- bypassed, the database itself rejects cross-tenant queries.
 -- This is true defense-in-depth: two independent layers of isolation.
+--
+-- NOTE: Prisma creates columns in camelCase (e.g., "tenantId" not
+-- tenant_id). The policies below use the quoted camelCase names.
 -- =====================================================================
 
 -- 1. Enable + Force RLS on every tenant-scoped table.
---    FORCE means the policy applies even to table owners (superadmins
---    still bypass via BYPASSRLS, but regular roles do not).
 
 -- Core tenancy
 ALTER TABLE "Tenant"            ENABLE ROW LEVEL SECURITY;
@@ -43,31 +44,32 @@ ALTER TABLE "Appointment"       ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "ActivityLog"       ENABLE ROW LEVEL SECURITY;
 
 -- 2. Tenant isolation policies.
--- Each policy filters by: tenant_id = current_setting('app.current_tenant_id')::text
+-- Each policy filters by: "tenantId" = current_setting('app.current_tenant_id')::text
+-- (Prisma uses camelCase column names, quoted in SQL)
 
 -- Core
 CREATE POLICY tenant_isolation_tenant       ON "Tenant"        USING (id = current_setting('app.current_tenant_id')::text);
-CREATE POLICY tenant_isolation_user         ON "User"          USING (tenant_id = current_setting('app.current_tenant_id')::text);
-CREATE POLICY tenant_isolation_account      ON "Account"       USING (tenant_id = current_setting('app.current_tenant_id')::text);
-CREATE POLICY tenant_isolation_journal      ON "JournalEntry"  USING (tenant_id = current_setting('app.current_tenant_id')::text);
+CREATE POLICY tenant_isolation_user         ON "User"          USING ("tenantId" = current_setting('app.current_tenant_id')::text);
+CREATE POLICY tenant_isolation_account      ON "Account"       USING ("tenantId" = current_setting('app.current_tenant_id')::text);
+CREATE POLICY tenant_isolation_journal      ON "JournalEntry"  USING ("tenantId" = current_setting('app.current_tenant_id')::text);
 
 -- Phase 1
-CREATE POLICY tenant_isolation_invoice      ON "Invoice"       USING (tenant_id = current_setting('app.current_tenant_id')::text);
+CREATE POLICY tenant_isolation_invoice      ON "Invoice"       USING ("tenantId" = current_setting('app.current_tenant_id')::text);
 
 -- Phase 2
-CREATE POLICY tenant_isolation_warehouse    ON "Warehouse"     USING (tenant_id = current_setting('app.current_tenant_id')::text);
-CREATE POLICY tenant_isolation_product      ON "Product"       USING (tenant_id = current_setting('app.current_tenant_id')::text);
-CREATE POLICY tenant_isolation_stock_move   ON "StockMovement" USING (tenant_id = current_setting('app.current_tenant_id')::text);
-CREATE POLICY tenant_isolation_purchase     ON "PurchaseOrder" USING (tenant_id = current_setting('app.current_tenant_id')::text);
+CREATE POLICY tenant_isolation_warehouse    ON "Warehouse"     USING ("tenantId" = current_setting('app.current_tenant_id')::text);
+CREATE POLICY tenant_isolation_product      ON "Product"       USING ("tenantId" = current_setting('app.current_tenant_id')::text);
+CREATE POLICY tenant_isolation_stock_move   ON "StockMovement" USING ("tenantId" = current_setting('app.current_tenant_id')::text);
+CREATE POLICY tenant_isolation_purchase     ON "PurchaseOrder" USING ("tenantId" = current_setting('app.current_tenant_id')::text);
 
 -- Phase 4
-CREATE POLICY tenant_isolation_employee     ON "Employee"      USING (tenant_id = current_setting('app.current_tenant_id')::text);
-CREATE POLICY tenant_isolation_payroll      ON "PayrollRun"    USING (tenant_id = current_setting('app.current_tenant_id')::text);
+CREATE POLICY tenant_isolation_employee     ON "Employee"      USING ("tenantId" = current_setting('app.current_tenant_id')::text);
+CREATE POLICY tenant_isolation_payroll      ON "PayrollRun"    USING ("tenantId" = current_setting('app.current_tenant_id')::text);
 
 -- Phase 5
-CREATE POLICY tenant_isolation_customer     ON "Customer"      USING (tenant_id = current_setting('app.current_tenant_id')::text);
-CREATE POLICY tenant_isolation_appt         ON "Appointment"   USING (tenant_id = current_setting('app.current_tenant_id')::text);
-CREATE POLICY tenant_isolation_activity     ON "ActivityLog"   USING (tenant_id = current_setting('app.current_tenant_id')::text);
+CREATE POLICY tenant_isolation_customer     ON "Customer"      USING ("tenantId" = current_setting('app.current_tenant_id')::text);
+CREATE POLICY tenant_isolation_appt         ON "Appointment"   USING ("tenantId" = current_setting('app.current_tenant_id')::text);
+CREATE POLICY tenant_isolation_activity     ON "ActivityLog"   USING ("tenantId" = current_setting('app.current_tenant_id')::text);
 
 -- 3. FORCE the policy even for table owners (defense in depth).
 ALTER TABLE "Tenant"          FORCE ROW LEVEL SECURITY;
@@ -100,6 +102,6 @@ ALTER TABLE "ActivityLog"     FORCE ROW LEVEL SECURITY;
 --    SET app.current_tenant_id = 'tenant-noor';
 --    SELECT count(*) FROM "User";  -- returns only tenant-noor users
 --
---    -- Without setting the variable (should FAIL or return 0 rows)
+--    -- Without setting the variable (should return 0 rows)
 --    RESET app.current_tenant_id;
 --    SELECT count(*) FROM "User";  -- returns 0 (no context = no access)

@@ -1,11 +1,11 @@
 /**
- * H.A.M.D ERP — Seed (Phase 0)
+ * H.A.M.D ERP — Seed
  *
  * Creates:
- *  - 3 roles: admin, accountant, viewer (with permissions)
+ *  - 5 roles: admin, accountant, hr_manager, cashier, viewer (with permissions)
  *  - 2 tenants (Tenant A "شركة الأفق", Tenant B "شركة النور") so we can
  *    DEMONSTRATE cross-tenant isolation in the test endpoint.
- *  - For each tenant: admin / accountant / viewer users (password = "password123")
+ *  - For each tenant: admin / accountant / hr / cashier / viewer users (password = "password123")
  *  - A starter chart of accounts per tenant (different codes per tenant to
  *    make the isolation test visually obvious).
  *  - UI translations for ar-EG, ar-SA, en.
@@ -14,6 +14,23 @@
  */
 import { PrismaClient, AccountType } from '@prisma/client'
 import bcrypt from 'bcryptjs'
+
+// Load .env manually (bun run doesn't auto-load for scripts)
+import { readFileSync } from 'fs'
+try {
+  const envFile = readFileSync('.env', 'utf8')
+  for (const line of envFile.split('\n')) {
+    const match = line.match(/^([^#=]+)=(.*)$/)
+    if (match && !process.env[match[1].trim()]) {
+      process.env[match[1].trim()] = match[2].trim()
+    }
+  }
+} catch { /* .env not found — use existing env */ }
+
+// Use DIRECT_URL for seeding (session mode, no pgbouncer)
+if (process.env.DIRECT_URL) {
+  process.env.DATABASE_URL = process.env.DIRECT_URL
+}
 
 const prisma = new PrismaClient()
 
