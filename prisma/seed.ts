@@ -70,6 +70,8 @@ async function main() {
     'crm:manage',
     // Phase 7: Branding
     'tenant:manage',
+    // Phase 8: SaaS platform admin (separate from tenant RBAC)
+    'platform:admin',
   ]
   const permissions = await Promise.all(
     permissionKeys.map((key) =>
@@ -123,6 +125,10 @@ async function main() {
     {
       name: 'viewer',
       perms: ['account:read', 'journal:read', 'invoice:read', 'inventory:read', 'hr:read', 'crm:read'],
+    },
+    {
+      name: 'super_admin',
+      perms: ['platform:admin'],
     },
   ]
   const roles: Record<string, { id: string }> = {}
@@ -178,6 +184,9 @@ async function main() {
     { email: 'viewer@afak.test',    name: 'مشاهد الأفق',  tenantId: 'tenant-afak', role: 'viewer' },
     { email: 'admin@noor.test',     name: 'مدير النور',   tenantId: 'tenant-noor', role: 'admin' },
     { email: 'accountant@noor.test',name: 'محاسب النور',  tenantId: 'tenant-noor', role: 'accountant' },
+    // Phase 8: super-admin (platform owner) — not tied to a specific tenant
+    // but needs a tenant for auth. Uses tenant-afak as a base.
+    { email: 'superadmin@hamd.test', name: 'مالك المنصة',  tenantId: 'tenant-afak', role: 'super_admin' },
   ]
   for (const u of userDefs) {
     const user = await prisma.user.upsert({
@@ -320,6 +329,45 @@ async function main() {
       })
     }
   }
+
+  // ---------- 5d. SaaS Plans & Subscriptions (Phase 8) ----------
+
+  // Create the starter plan (default for all demo tenants)
+  const starterPlan = await prisma.plan.upsert({
+    where: { key: 'starter' },
+    update: {},
+    create: {
+      key: 'starter',
+      nameKey: 'plan.starter',
+      monthlyPrice: 500,
+      maxUsers: 10,
+      maxInvoicesPerMonth: 200,
+    },
+  })
+
+  // Create ACTIVE subscriptions for existing demo tenants (so tests pass
+  // without subscription enforcement blocking them)
+  for (const tenantId of ['tenant-afak', 'tenant-noor']) {
+    const existingSub = await prisma.subscription.findUnique({ where: { tenantId } })
+    if (!existingSub) {
+      await prisma.subscription.create({
+        data: {
+          tenantId,
+          planId: starterPlan.id,
+          status: 'ACTIVE',
+          currentPeriodEnd: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000), // 1 year
+          trialEndsAt: null,
+        },
+      })
+    } else {
+      // Ensure existing subs are ACTIVE for testing
+      await prisma.subscription.update({
+        where: { tenantId },
+        data: { status: 'ACTIVE', currentPeriodEnd: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000) },
+      })
+    }
+  }
+  console.log('  SaaS: starter plan + 2 ACTIVE subscriptions created')
 
   // ---------- 6. Translations ----------
   const translations: Array<{ key: string; locale: string; value: string }> = [

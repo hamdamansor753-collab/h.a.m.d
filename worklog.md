@@ -357,3 +357,43 @@ Stage Summary:
 - All 26 tests PASS on PostgreSQL
 - Two layers of defense: (1) Prisma Proxy middleware (application), (2) PostgreSQL RLS (database)
 - Even if the application middleware is completely bypassed, the database itself rejects cross-tenant queries
+
+---
+Task ID: Phase 7 + Phase 8
+Agent: main-orchestrator
+Task: Phase 7 (Branding) + Phase 8 (SaaS Billing) — both completed on PostgreSQL/Supabase
+
+Phase 7 Work Log:
+- Added BrandSettings model + businessType on Tenant (additive)
+- Created getBusinessTypeSeedExtras(businessType) — returns extra accounts per industry (clinic→consultationFees, restaurant→kitchenWaste, retail→salesDiscounts)
+- Built branding.service.ts: getBranding (returns defaults if no settings) + updateBranding (upsert)
+- Built /api/tenant/branding (GET/PATCH) with tenant:manage permission
+- Built branding-panel UI with color pickers, logo URL, invoice footer, live preview
+- Tests 27-30: clinic seed extras PASS, branding update+read PASS, backward compat PASS, tenant isolation PASS
+
+Phase 8 Work Log:
+- Added Plan, Subscription, SubscriptionStatus, PaymentRecord models to schema
+- Created subscription.service.ts with:
+  - requireActiveSubscription() — central enforcement (SUSPENDED→GET ok, POST→402; CANCELLED→402)
+  - getSubscription() with RLS bypass (SET LOCAL row_security = off)
+  - createSubscription() — new tenant gets TRIALING (14 days)
+  - recordPayment() — extends currentPeriodEnd, sets ACTIVE
+  - checkMaxUsers() / checkMaxInvoices() — usage limit checks
+  - listAllTenantsWithSubscriptions() — super-admin only
+- Updated withTenantContext to enforce subscription centrally (ONE call, no duplication)
+- Added maxInvoicesPerMonth check in createInvoice
+- Added SubscriptionSuspendedError + UsageLimitExceededError to lib/api.ts with 402 status mapping
+- Built /api/admin/tenants (GET) + /api/admin/payments (POST) — platform:admin only, uses dbRaw
+- Added platform:admin permission + super_admin role + superadmin@hamd.test user in seed
+- Created starter Plan + ACTIVE subscriptions for existing demo tenants
+- Tests 31-35: trialing auto PASS, payment extends PASS, suspended 402 PASS, maxUsers PASS, admin isolation PASS
+
+Stage Summary:
+- All 35 tests PASS on PostgreSQL (Supabase):
+  1-26: Phase 0-5 + Production Hardening all PASS
+  27-30: Phase 7 (Branding) all PASS
+  31-35: Phase 8 (SaaS Billing) all PASS
+- Subscription enforcement is CENTRALIZED in withTenantContext — no duplication
+- platform:admin is completely separate from tenant RBAC — regular admin CANNOT access /api/admin/*
+- SUSPENDED tenants can read but not write (402) — data hostage prevention
+- Lint clean

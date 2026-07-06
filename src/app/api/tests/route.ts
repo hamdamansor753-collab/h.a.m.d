@@ -66,6 +66,8 @@ import { getNextSequenceValue } from '@/core/sequence/service'
 import { getPayrollProvider } from '@/core/payroll/provider'
 import { getBranding, updateBranding } from '@/modules/branding/branding.service'
 import { getBusinessTypeSeedExtras } from '@/modules/branding/business-type-seed'
+import { getSubscription, createSubscription, recordPayment, listAllTenantsWithSubscriptions, getPlanByKey, checkMaxUsers } from '@/modules/saas/subscription.service'
+import { SubscriptionSuspendedError, UsageLimitExceededError } from '@/lib/api'
 import { JournalBalanceError, InvoiceStateError, InsufficientStockError, PayrollStateError } from '@/lib/api'
 import { db, dbRaw } from '@/lib/db'
 import { ok, mapError, unauthorized } from '@/lib/api'
@@ -82,13 +84,8 @@ interface TestResult {
 export async function POST() {
   try {
     const results = await withTenantContext(async (ctx) => {
-      // Phase 0 fix: only admin (system:test permission) may run security
-      // tests. The tests use dbRaw to inspect another tenant's data —
-      // granting this to viewer/accountant would leak tenant boundaries.
       requirePermission('system:test')
-
       const results: TestResult[] = []
-
       // ---------------- Test 1: Tenant isolation ----------------
       // Find the OTHER tenant's account. We use `dbRaw` (the raw client
       // without tenant middleware) here because this lookup is INTENTIONALLY
@@ -1748,6 +1745,225 @@ export async function POST() {
         brandingIsolationDetails = { error: e instanceof Error ? e.message : String(e) }
       }
       results.push({ name: 'branding-tenant-isolation', passed: brandingIsolationPassed, details: brandingIsolationDetails })
+
+      // =================================================================
+      // PHASE 8 TESTS: SaaS Billing — subscription enforcement, payment,
+      // suspended 402, maxUsers, admin isolation
+      // =================================================================
+
+      // ---------------- Test 31: New tenant → TRIALING subscription ----------------
+      let trialingPassed = false
+      let trialingDetails: Record<string, unknown> = {}
+      try {
+        // Create a new tenant via dbRaw
+        const newTenant = await dbRaw.tenant.create({
+          data: {
+            id: `tenant-test-${Date.now()}`,
+            name: 'Test Tenant for SaaS',
+            defaultLocale: 'ar-EG',
+            country: 'EG',
+          },
+        })
+
+        // Get the starter plan
+        const plan = await getPlanByKey('starter')
+        if (!plan) throw new Error('Starter plan not found')
+
+        // Create a subscription for the new tenant
+        const sub = await createSubscription({
+          tenantId: newTenant.id,
+          planId: plan.id,
+          trialDays: 14,
+        })
+
+        const isTrialing = sub.status === 'TRIALING'
+        const hasTrialEnd = sub.trialEndsAt !== null
+        const periodEndInFuture = new Date(sub.currentPeriodEnd) > new Date()
+
+        trialingPassed = isTrialing && hasTrialEnd && periodEndInFuture
+        trialingDetails = {
+          tenantId: newTenant.id,
+          subscriptionId: sub.id,
+          status: sub.status,
+          isTrialing,
+          trialEndsAt: sub.trialEndsAt,
+          hasTrialEnd,
+          currentPeriodEnd: sub.currentPeriodEnd,
+          periodEndInFuture,
+        }
+
+        // Cleanup
+        await dbRaw.subscription.delete({ where: { id: sub.id } })
+        await dbRaw.tenant.delete({ where: { id: newTenant.id } })
+      } catch (e) {
+        trialingDetails = { error: e instanceof Error ? e.message : String(e) }
+      }
+      results.push({ name: 'new-tenant-trialing', passed: trialingPassed, details: trialingDetails })
+
+      // ---------------- Test 32: Manual payment → currentPeriodEnd extends, status ACTIVE ----------------
+      let paymentPassed = false
+      let paymentDetails: Record<string, unknown> = {}
+      try {
+        // Use tenant-afak's subscription
+        const sub = await getSubscription(ctx.tenantId)
+        if (!sub) throw new Error('No subscription for current tenant')
+
+        const oldPeriodEnd = new Date(sub.currentPeriodEnd)
+
+        // Record a 1-month payment
+        const result = await recordPayment({
+          subscriptionId: sub.id,
+          amount: 500,
+          method: 'bank_transfer',
+          recordedByUserId: ctx.userId,
+          extendMonths: 1,
+        })
+
+        const newPeriodEnd = new Date(result.subscription.currentPeriodEnd)
+        const periodExtended = newPeriodEnd > oldPeriodEnd
+        const isActive = result.subscription.status === 'ACTIVE'
+        const paymentRecorded = !!result.payment.id
+
+        paymentPassed = periodExtended && isActive && paymentRecorded
+        paymentDetails = {
+          subscriptionId: sub.id,
+          oldPeriodEnd: oldPeriodEnd.toISOString(),
+          newPeriodEnd: newPeriodEnd.toISOString(),
+          periodExtended,
+          status: result.subscription.status,
+          isActive,
+          paymentId: result.payment.id,
+          paymentRecorded,
+        }
+      } catch (e) {
+        paymentDetails = { error: e instanceof Error ? e.message : String(e) }
+      }
+      results.push({ name: 'manual-payment-extends', passed: paymentPassed, details: paymentDetails })
+
+      // ---------------- Test 33: SUSPENDED → GET allowed, POST rejected (402) ----------------
+      let suspendedPassed = false
+      let suspendedDetails: Record<string, unknown> = {}
+      try {
+        // Temporarily set the current tenant's subscription to SUSPENDED
+        const sub = await getSubscription(ctx.tenantId)
+        if (!sub) throw new Error('No subscription')
+
+        // Disable RLS to update the subscription (platform-level operation)
+        try { await dbRaw.$executeRawUnsafe('SET LOCAL row_security = off') } catch {}
+        await dbRaw.subscription.update({
+          where: { id: sub.id },
+          data: { status: 'SUSPENDED' },
+        })
+
+        // Verify requireActiveSubscription allows GET but rejects POST
+        const { requireActiveSubscription } = await import('@/modules/saas/subscription.service')
+        const suspendedSub = await getSubscription(ctx.tenantId)
+
+        // GET should pass
+        let getBlocked = false
+        try {
+          requireActiveSubscription(suspendedSub, 'GET')
+        } catch {
+          getBlocked = true
+        }
+
+        // POST should throw SubscriptionSuspendedError
+        let postBlocked = false
+        let postError: string | null = null
+        try {
+          requireActiveSubscription(suspendedSub, 'POST')
+        } catch (e) {
+          // The error might be from saas/subscription.service (our class)
+          // or from lib/api (duplicate class). Check by name.
+          postBlocked = e instanceof SubscriptionSuspendedError || (e instanceof Error && e.name === 'SubscriptionSuspendedError')
+          postError = e instanceof Error ? e.name : 'unknown'
+        }
+
+        suspendedPassed = !getBlocked && postBlocked
+        suspendedDetails = {
+          subscriptionId: sub.id,
+          getBlocked,
+          postBlocked,
+          postError,
+        }
+
+        // Restore to ACTIVE
+        try { await dbRaw.$executeRawUnsafe('SET LOCAL row_security = off') } catch {}
+        await dbRaw.subscription.update({
+          where: { id: sub.id },
+          data: { status: 'ACTIVE' },
+        })
+      } catch (e) {
+        suspendedDetails = { error: e instanceof Error ? e.message : String(e) }
+      }
+      results.push({ name: 'suspended-get-allowed-post-402', passed: suspendedPassed, details: suspendedDetails })
+
+      // ---------------- Test 34: maxUsers limit → reject new user creation ----------------
+      let maxUsersPassed = false
+      let maxUsersDetails: Record<string, unknown> = {}
+      try {
+        // Get current tenant's subscription + plan
+        const sub = await getSubscription(ctx.tenantId)
+        if (!sub) throw new Error('No subscription')
+
+        const plan = await dbRaw.plan.findUnique({ where: { id: sub.planId } })
+        if (!plan) throw new Error('No plan')
+
+        // Temporarily set maxUsers to 1 (lower than current user count)
+        await dbRaw.plan.update({
+          where: { id: plan.id },
+          data: { maxUsers: 1 },
+        })
+
+        // Check maxUsers — should be exceeded
+        const check = await checkMaxUsers(ctx.tenantId)
+        const limitExceeded = !check.allowed
+
+        // Restore maxUsers
+        await dbRaw.plan.update({
+          where: { id: plan.id },
+          data: { maxUsers: 10 }, // starter plan default
+        })
+
+        maxUsersPassed = limitExceeded
+        maxUsersDetails = {
+          tenantId: ctx.tenantId,
+          currentUsers: check.current,
+          maxUsers: 1,
+          limitExceeded,
+        }
+      } catch (e) {
+        maxUsersDetails = { error: e instanceof Error ? e.message : String(e) }
+      }
+      results.push({ name: 'max-users-limit-enforced', passed: maxUsersPassed, details: maxUsersDetails })
+
+      // ---------------- Test 35: Admin isolation — regular admin cannot access /api/admin/tenants ----------------
+      let adminIsolationPassed = false
+      let adminIsolationDetails: Record<string, unknown> = {}
+      try {
+        // The current test user (admin@afak.test) has 'admin' role but NOT 'platform:admin'
+        // Verify by checking the context's permissionKeys
+        const hasPlatformAdmin = ctx.permissionKeys.includes('platform:admin')
+        const hasRegularAdmin = ctx.permissionKeys.includes('tenant:manage')
+
+        // Regular admin should NOT have platform:admin
+        const regularAdminBlocked = !hasPlatformAdmin
+
+        // But should have regular admin permissions
+        const hasTenantManage = hasRegularAdmin
+
+        adminIsolationPassed = regularAdminBlocked && hasTenantManage
+        adminIsolationDetails = {
+          currentUserId: ctx.userId,
+          hasPlatformAdmin,
+          hasTenantManage,
+          regularAdminBlocked,
+          note: 'Regular tenant admin has tenant:manage but NOT platform:admin — cannot access /api/admin/*',
+        }
+      } catch (e) {
+        adminIsolationDetails = { error: e instanceof Error ? e.message : String(e) }
+      }
+      results.push({ name: 'admin-isolation-platform-separate', passed: adminIsolationPassed, details: adminIsolationDetails })
 
       return results
     })

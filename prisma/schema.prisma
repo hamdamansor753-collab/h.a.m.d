@@ -43,6 +43,8 @@ model Tenant {
   // Phase 7: branding + business type
   businessType  String       @default("general") // "general" | "retail" | "restaurant" | "clinic" | "services"
   brandSettings BrandSettings?
+  // Phase 8: SaaS subscription
+  subscription  Subscription?
 }
 
 model User {
@@ -458,4 +460,50 @@ model BrandSettings {
   accentColor       String   @default("#06b6d4") // cyan — H.A.M.D default
   invoiceFooterText String?  // custom text at bottom of invoices (terms, contact)
   updatedAt         DateTime @updatedAt
+}
+
+// ================= PHASE 8: SAAS BILLING & SUBSCRIPTIONS =================
+// These tables are platform-level (not tenant-scoped in the usual sense).
+// They are managed by the platform owner (super-admin), not by tenant users.
+
+model Plan {
+  id                  String   @id @default(uuid())
+  key                 String   @unique // "starter" | "pro" | "enterprise"
+  nameKey             String
+  monthlyPrice        Decimal
+  maxUsers            Int
+  maxInvoicesPerMonth Int?     // null = unlimited
+  subscriptions       Subscription[]
+}
+
+model Subscription {
+  id               String             @id @default(uuid())
+  tenantId         String             @unique
+  tenant           Tenant             @relation(fields: [tenantId], references: [id])
+  planId           String
+  plan             Plan               @relation(fields: [planId], references: [id])
+  status           SubscriptionStatus @default(TRIALING)
+  currentPeriodEnd DateTime
+  trialEndsAt      DateTime?
+  createdAt        DateTime           @default(now())
+  payments         PaymentRecord[]
+}
+
+enum SubscriptionStatus {
+  TRIALING    // free trial — everything allowed
+  ACTIVE      // paid and active
+  PAST_DUE    // payment overdue, grace period — still works with warning
+  SUSPENDED   // grace ended — read only, no writes (402)
+  CANCELLED   // permanently cancelled — no access at all
+}
+
+model PaymentRecord {
+  id               String   @id @default(uuid())
+  subscriptionId   String
+  subscription     Subscription @relation(fields: [subscriptionId], references: [id])
+  amount           Decimal
+  method           String   // "bank_transfer" | "instapay" | "cash" ...
+  recordedByUserId String   // super-admin who recorded it
+  periodExtendedTo DateTime  // new period end after this payment
+  createdAt        DateTime @default(now())
 }

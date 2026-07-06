@@ -163,6 +163,27 @@ export class PayrollStateError extends Error {
 }
 
 /**
+ * Thrown when a tenant's subscription is SUSPENDED (writes rejected) or
+ * CANCELLED (all access rejected). Maps to HTTP 402 Payment Required.
+ */
+export class SubscriptionSuspendedError extends Error {
+  constructor(public status: string) {
+    super(`Subscription is ${status}`)
+    this.name = 'SubscriptionSuspendedError'
+  }
+}
+
+/**
+ * Thrown when a usage limit (maxUsers, maxInvoicesPerMonth) is exceeded.
+ */
+export class UsageLimitExceededError extends Error {
+  constructor(public limit: string, public current: number, public max: number | null) {
+    super(`Usage limit exceeded: ${limit} (${current}/${max ?? 'unlimited'})`)
+    this.name = 'UsageLimitExceededError'
+  }
+}
+
+/**
  * Map a thrown error from the service layer to an HTTP response.
  */
 export function mapError(err: unknown, locale: ApiLocale): NextResponse {
@@ -219,6 +240,19 @@ export function mapError(err: unknown, locale: ApiLocale): NextResponse {
   }
   if (err instanceof PayrollStateError) {
     return conflict(locale, 'payroll.cannotModify')
+  }
+  if (err instanceof SubscriptionSuspendedError) {
+    return NextResponse.json<ApiErrorBody>(
+      { error: { code: 'SUBSCRIPTION_SUSPENDED', message: `Subscription is ${(err as SubscriptionSuspendedError).status}` } },
+      { status: 402 }
+    )
+  }
+  if (err instanceof UsageLimitExceededError) {
+    const ule = err as UsageLimitExceededError
+    return NextResponse.json<ApiErrorBody>(
+      { error: { code: 'USAGE_LIMIT_EXCEEDED', message: `Limit exceeded: ${ule.limit} (${ule.current}/${ule.max ?? 'unlimited'})` } },
+      { status: 402 }
+    )
   }
   return serverError(locale)
 }

@@ -38,6 +38,8 @@ const PROTECTED_PREFIXES = [
   '/api/reminders',
   // Phase 7: Branding
   '/api/tenant',
+  // Phase 8: SaaS admin
+  '/api/admin',
 ]
 
 export async function middleware(req: NextRequest) {

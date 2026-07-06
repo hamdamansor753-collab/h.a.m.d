@@ -19,6 +19,8 @@ import { getTenantContext } from '@/core/tenancy/context'
 import { prepareJournalEntry, createJournalEntryOn, type JournalEntryInput } from '@/core/ledger/journal-entry.service'
 import { getTaxProvider, type TaxResult } from '@/core/ledger/tax-provider'
 import { getNextSequenceValue, formatSequenceNumber } from '@/core/sequence/service'
+import { checkMaxInvoices } from '@/modules/saas/subscription.service'
+import { UsageLimitExceededError } from '@/lib/api'
 import { InvoiceStateError, InvoiceConfigError } from '@/lib/api'
 import type { Invoice, InvoiceLine, Prisma } from '@prisma/client'
 
@@ -146,6 +148,15 @@ export async function createInvoice(
   if (!tx) requirePermission('invoice:create')
   const ctx = getTenantContext()
   if (!ctx) throw new Error('No tenant context')
+
+  // Phase 8: Check maxInvoicesPerMonth usage limit (only when not inside a tx —
+  // i.e., when called directly from a route, not from posSale which checks its own limits)
+  if (!tx) {
+    const limit = await checkMaxInvoices(ctx.tenantId)
+    if (!limit.allowed) {
+      throw new UsageLimitExceededError('maxInvoicesPerMonth', limit.current, limit.max)
+    }
+  }
 
   const client = tx ?? db
   const number = await nextInvoiceNumber(client)
