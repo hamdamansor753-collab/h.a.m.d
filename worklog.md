@@ -397,3 +397,29 @@ Stage Summary:
 - platform:admin is completely separate from tenant RBAC — regular admin CANNOT access /api/admin/*
 - SUSPENDED tenants can read but not write (402) — data hostage prevention
 - Lint clean
+
+---
+Task ID: UI Polish & Translation Audit
+Agent: main-orchestrator
+Task: Fix missing translations, clean test data, redesign dashboard UI
+
+Work Log:
+- Task 1 (Translation Audit): Ran script comparing all t() keys in code vs DB. Found 90 missing keys (POS, CRM, HR, Payroll, Branding, Nav, Tests, Common). Added 179 keys × 3 locales = 537 translations to PostgreSQL. DB now has 253 unique keys (was 125).
+- Task 2 (Test Data Cleanup): Deleted 45 test appointments, 44 test customers, verified 0 remaining test records. All "Test Customer*", "Cross Tenant*", "Walk-in*" records removed from production PostgreSQL.
+- Task 3 (Reminders Widget): Replaced fixed overlay widget with RemindersBell — a dropdown from a bell icon in the header. Opens/closes on click, closes on outside click, shows badge count. No more visual overlap with navigation.
+- Task 4 (Design Polish): Redesigned dashboard:
+  - Sidebar: gradient top section (from-primary/20 to transparent) with "H" logo badge using from-primary to-accent gradient
+  - Nav grouped: Operations (POS), Accounting (Accounts/Journal/Invoices), Commerce (Inventory/Purchases/CRM/Appointments), People (HR/Payroll), System (Reports/Branding/Tests) — each group has uppercase label
+  - Active item: cyan accent bg (bg-accent/15) + border-inline-start 2px solid accent + bold icon stroke
+  - Inactive items: sidebar-foreground/60 (lighter), hover reveals full color + bg-sidebar-accent/40
+  - All icons lucide with consistent h-3.5 w-3.5, stroke-width varies active(2.25)/inactive(1.75)
+  - Header: compact, bell icon + language switcher + user badge + logout
+  - Tenant info: bottom of sidebar in subtle card
+  - Footer: minimal text
+
+Stage Summary:
+- All 13 nav items show correct Arabic translations (verified via browser)
+- Login screen shows Arabic labels correctly
+- 35/35 tests ALL PASS after UI changes
+- Lint clean
+- Zero test data in production DB
