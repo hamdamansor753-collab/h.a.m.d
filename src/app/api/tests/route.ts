@@ -62,6 +62,8 @@ import { createPayrollRun, postPayrollRun, listPayrollRuns } from '@/modules/hr/
 import { createCustomer } from '@/modules/crm/customer.service'
 import { scheduleAppointment, getDueReminders } from '@/modules/crm/appointment.service'
 import { listActivityLogs } from '@/modules/crm/activity-log.service'
+import { getNextSequenceValue } from '@/core/sequence/service'
+import { getPayrollProvider } from '@/core/payroll/provider'
 import { JournalBalanceError, InvoiceStateError, InsufficientStockError, PayrollStateError } from '@/lib/api'
 import { db, dbRaw } from '@/lib/db'
 import { ok, mapError, unauthorized } from '@/lib/api'
@@ -1376,6 +1378,208 @@ export async function POST() {
         crmIsolationDetails = { error: e instanceof Error ? e.message : String(e) }
       }
       results.push({ name: 'crm-tenant-isolation', passed: crmIsolationPassed, details: crmIsolationDetails })
+
+      // =================================================================
+      // PRODUCTION HARDENING TESTS: Atomic sequences, stock concurrency,
+      // payroll tax accuracy, RLS documentation
+      // =================================================================
+
+      // ---------------- Test 23: Atomic sequence — concurrent invoice numbers are unique ----------------
+      let seqConcurrencyPassed = false
+      let seqConcurrencyDetails: Record<string, unknown> = {}
+      try {
+        // Fire 5 concurrent getNextSequenceValue calls for the same key
+        const key = `test_concurrency_${Date.now()}`
+        const promises = Array.from({ length: 5 }, () => getNextSequenceValue(key))
+        const values = await Promise.all(promises)
+
+        // All 5 values must be unique (1, 2, 3, 4, 5 in some order)
+        const uniqueValues = new Set(values)
+        const allUnique = uniqueValues.size === 5
+        const inRange = values.every(v => v >= 1 && v <= 5)
+
+        seqConcurrencyPassed = allUnique && inRange
+        seqConcurrencyDetails = {
+          sequenceKey: key,
+          values: values.sort((a, b) => a - b),
+          uniqueCount: uniqueValues.size,
+          allUnique,
+          inRange,
+        }
+
+        // Cleanup
+        await dbRaw.sequenceCounter.deleteMany({ where: { sequenceKey: key } })
+      } catch (e) {
+        seqConcurrencyDetails = { error: e instanceof Error ? e.message : String(e) }
+      }
+      results.push({ name: 'sequence-concurrency-unique', passed: seqConcurrencyPassed, details: seqConcurrencyDetails })
+
+      // ---------------- Test 24: Stock concurrency — two concurrent sales exceeding stock, only one succeeds ----------------
+      let stockConcurrencyPassed = false
+      let stockConcurrencyDetails: Record<string, unknown> = {}
+      try {
+        const products = await listProducts()
+        const warehouses = await listWarehouses()
+        if (products.length === 0 || warehouses.length === 0) {
+          throw new Error('No products or warehouses')
+        }
+        const product = products[0]
+        const warehouse = warehouses[0]
+
+        const stockBefore = await getStockLevel(product.id, warehouse.id)
+        if (stockBefore < 2) {
+          throw new Error(`Need >= 2 units (have ${stockBefore})`)
+        }
+
+        // Two concurrent sales, each requesting the FULL stock amount
+        // Combined = 2 × stock > stock → only one should succeed
+        const saleQty = stockBefore
+        const { recordSale } = await import('@/modules/inventory/sales-movement.service')
+
+        const [result1, result2] = await Promise.allSettled([
+          recordSale({ productId: product.id, warehouseId: warehouse.id, quantity: saleQty, sourceRefId: 'concurrency-test-1' }),
+          recordSale({ productId: product.id, warehouseId: warehouse.id, quantity: saleQty, sourceRefId: 'concurrency-test-2' }),
+        ])
+
+        const oneSucceeded = (result1.status === 'fulfilled' && result2.status === 'rejected') ||
+                             (result1.status === 'rejected' && result2.status === 'fulfilled')
+        const bothSucceeded = result1.status === 'fulfilled' && result2.status === 'fulfilled'
+        const bothFailed = result1.status === 'rejected' && result2.status === 'rejected'
+
+        // Verify stock decreased by exactly saleQty (not 2×saleQty)
+        const stockAfter = await getStockLevel(product.id, warehouse.id)
+        const stockDelta = stockBefore - stockAfter
+        const stockCorrect = stockDelta === saleQty
+
+        stockConcurrencyPassed = oneSucceeded && !bothSucceeded && !bothFailed && stockCorrect
+        stockConcurrencyDetails = {
+          stockBefore,
+          saleQtyPerRequest: saleQty,
+          combinedQty: saleQty * 2,
+          result1Status: result1.status,
+          result2Status: result2.status,
+          oneSucceeded,
+          bothSucceeded,
+          bothFailed,
+          stockAfter,
+          stockDelta,
+          stockCorrect,
+        }
+      } catch (e) {
+        stockConcurrencyDetails = { error: e instanceof Error ? e.message : String(e) }
+      }
+      results.push({ name: 'stock-concurrency-one-succeeds', passed: stockConcurrencyPassed, details: stockConcurrencyDetails })
+
+      // ---------------- Test 25: Payroll tax accuracy — manual verification with 7 brackets ----------------
+      let payrollTaxPassed = false
+      let payrollTaxDetails: Record<string, unknown> = {}
+      try {
+        const provider = getPayrollProvider('EG')
+        if (!provider) throw new Error('No EG payroll provider')
+
+        // Test with a salary of 15,000 EGP/month (180,000 EGP/year)
+        const monthlyGross = 15000
+        const result = provider.calculatePayroll({ countryCode: 'EG', grossSalary: monthlyGross })
+
+        // Manual calculation:
+        // 1. Insurance: insuredSalary = min(15000, 10500) = 10500
+        //    employeeInsurance = 10500 × 11% = 1155
+        //    employerInsurance = 10500 × 19% = 1995
+        // 2. Monthly taxable = 15000 - 1155 = 13845
+        //    Annual taxable = 13845 × 12 = 166140
+        // 3. Progressive tax:
+        //    0–40000 @ 0% = 0
+        //    40001–55000 @ 10% = 1500
+        //    55001–70000 @ 15% = 2250
+        //    70001–166140 @ 20% = 19228
+        //    Annual tax = 0 + 1500 + 2250 + 19228 = 22978
+        //    Monthly tax = 22978 / 12 = 1914.83
+        // 4. Net pay = 15000 - 1155 - 1914.83 = 11930.17
+
+        const expectedEmployeeInsurance = 1155
+        const expectedEmployerInsurance = 1995
+        const expectedMonthlyTax = Math.round((22978 / 12) * 100) / 100 // 1914.83
+        const expectedNetPay = Math.round((15000 - 1155 - expectedMonthlyTax) * 100) / 100
+
+        const insuranceCorrect = result.employeeInsurance === expectedEmployeeInsurance
+        const employerInsuranceCorrect = result.employerInsurance === expectedEmployerInsurance
+        const taxCorrect = Math.abs(result.incomeTax - expectedMonthlyTax) < 0.02
+        const netPayCorrect = Math.abs(result.netPay - expectedNetPay) < 0.02
+
+        payrollTaxPassed = insuranceCorrect && employerInsuranceCorrect && taxCorrect && netPayCorrect
+        payrollTaxDetails = {
+          monthlyGross,
+          calculatedEmployeeInsurance: result.employeeInsurance,
+          expectedEmployeeInsurance,
+          insuranceCorrect,
+          calculatedEmployerInsurance: result.employerInsurance,
+          expectedEmployerInsurance,
+          employerInsuranceCorrect,
+          calculatedMonthlyTax: result.incomeTax,
+          expectedMonthlyTax,
+          taxCorrect,
+          calculatedNetPay: result.netPay,
+          expectedNetPay,
+          netPayCorrect,
+          note: '7 progressive brackets, annual calc /12, insurance capped at 10500',
+        }
+      } catch (e) {
+        payrollTaxDetails = { error: e instanceof Error ? e.message : String(e) }
+      }
+      results.push({ name: 'payroll-tax-7-brackets-accurate', passed: payrollTaxPassed, details: payrollTaxDetails })
+
+      // ---------------- Test 26: RLS documentation (SQLite limitation) ----------------
+      // SQLite has no native RLS. The Prisma middleware is the active
+      // isolation layer in this environment. The RLS SQL file is provided
+      // for PostgreSQL production deployment.
+      //
+      // This test verifies that the RLS SQL file EXISTS and covers ALL
+      // tenant-scoped tables. The actual RLS execution test requires
+      // PostgreSQL (see prisma/sql/tenant_rls_postgres.sql for manual
+      // verification queries).
+      let rlsDocPassed = false
+      let rlsDocDetails: Record<string, unknown> = {}
+      try {
+        // Read the RLS SQL file and verify it covers all tenant-scoped tables
+        const fs = await import('fs')
+        const path = await import('path')
+        const rlsFilePath = path.join(process.cwd(), 'prisma', 'sql', 'tenant_rls_postgres.sql')
+        const fileExists = fs.existsSync(rlsFilePath)
+
+        if (fileExists) {
+          const content = fs.readFileSync(rlsFilePath, 'utf-8')
+          const requiredTables = [
+            'Tenant', 'User', 'Account', 'JournalEntry', 'Invoice',
+            'Warehouse', 'Product', 'StockMovement', 'PurchaseOrder',
+            'Employee', 'PayrollRun', 'Customer', 'Appointment', 'ActivityLog',
+          ]
+          const missingTables = requiredTables.filter(t => !content.includes(`"${t}"`))
+          const allTablesCovered = missingTables.length === 0
+          const hasEnableRLS = content.includes('ENABLE ROW LEVEL SECURITY')
+          const hasForceRLS = content.includes('FORCE ROW LEVEL SECURITY')
+          const hasPolicies = content.includes('CREATE POLICY')
+
+          rlsDocPassed = allTablesCovered && hasEnableRLS && hasForceRLS && hasPolicies
+          rlsDocDetails = {
+            environment: 'SQLite (no native RLS) — Prisma middleware is the active isolation layer',
+            rlsFileExists: fileExists,
+            rlsFilePath: 'prisma/sql/tenant_rls_postgres.sql',
+            tablesCovered: requiredTables.length - missingTables.length,
+            tablesTotal: requiredTables.length,
+            missingTables,
+            allTablesCovered,
+            hasEnableRLS,
+            hasForceRLS,
+            hasPolicies,
+            note: 'Actual RLS execution test requires PostgreSQL. See SQL file for manual verification queries.',
+          }
+        } else {
+          rlsDocDetails = { error: 'RLS SQL file not found', rlsFilePath }
+        }
+      } catch (e) {
+        rlsDocDetails = { error: e instanceof Error ? e.message : String(e) }
+      }
+      results.push({ name: 'rls-sql-complete', passed: rlsDocPassed, details: rlsDocDetails })
 
       return results
     })

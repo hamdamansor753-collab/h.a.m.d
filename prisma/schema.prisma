@@ -438,3 +438,13 @@ model ActivityLog {
 
   @@index([tenantId, customerId])
 }
+
+// ================= PRODUCTION HARDENING: SEQUENCE COUNTER =================
+
+model SequenceCounter {
+  tenantId    String
+  sequenceKey String   // "invoice" | "purchase_order" | ...
+  lastValue   Int      @default(0)
+
+  @@id([tenantId, sequenceKey])
+}

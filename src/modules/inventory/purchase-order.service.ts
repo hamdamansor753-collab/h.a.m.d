@@ -26,6 +26,7 @@ import {
   computeWeightedAverageCost,
 } from './stock-movement.service'
 import { createJournalEntryOn, type JournalEntryInput } from '@/core/ledger/journal-entry.service'
+import { getNextSequenceValue, formatSequenceNumber } from '@/core/sequence/service'
 import { PurchaseOrderStateError, InventoryConfigError } from '@/lib/api'
 import type { PurchaseOrder, PurchaseOrderLine, Prisma } from '@prisma/client'
 
@@ -62,10 +63,13 @@ async function resolveReceivingAccounts() {
 
 // ---------- Sequential numbering ----------
 
+/**
+ * Generate the next sequential purchase order number.
+ * Production Hardening: uses atomic SequenceCounter instead of count()+1.
+ */
 async function nextPurchaseOrderNumber(): Promise<string> {
-  const count = await db.purchaseOrder.count()
-  const n = count + 1
-  return `PO-${String(n).padStart(4, '0')}`
+  const value = await getNextSequenceValue('purchase_order')
+  return formatSequenceNumber('PO', value)
 }
 
 // ---------- CRUD: DRAFT ----------

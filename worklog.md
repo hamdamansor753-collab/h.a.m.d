@@ -294,3 +294,41 @@ Stage Summary:
   22. crm-tenant-isolation: PASS — cross-tenant customer read blocked (null), cross-tenant appointment blocked (customer not found in current tenant)
 - Lint clean, dev server running on port 3000
 - CRM panel shows test customers, appointments panel shows scheduled appointments with reminders
+
+---
+Task ID: 78-84
+Agent: main-orchestrator
+Task: Production Hardening — PostgreSQL RLS, atomic sequences, stock locking, payroll tax accuracy
+
+Work Log:
+- DOCKER/PostgreSQL NOT available in this sandbox. SQLite remains the active DB. All code is written to be PostgreSQL-compatible; RLS SQL is complete and ready for execution on PostgreSQL.
+- Updated prisma/sql/tenant_rls_postgres.sql: now covers ALL 14 tenant-scoped tables (was only 4 in Phase 0). Added ENABLE + FORCE RLS + CREATE POLICY for every table. Added manual verification queries at the end of the file.
+- Added SequenceCounter model to schema.prisma: @@id([tenantId, sequenceKey]), lastValue Int @default(0)
+- Created src/core/sequence/service.ts: getNextSequenceValue(sequenceKey, tx?) uses Prisma upsert (INSERT ... ON CONFLICT DO UPDATE) — truly atomic on both SQLite and PostgreSQL. No race condition possible.
+- Replaced nextInvoiceNumber in invoice.service.ts: now calls getNextSequenceValue('invoice', client) + formatSequenceNumber('INV', value). Old count()+1 pattern removed.
+- Replaced nextPurchaseOrderNumber in purchase-order.service.ts: now calls getNextSequenceValue('purchase_order') + formatSequenceNumber('PO', value). Old count()+1 pattern removed.
+- Fixed sequence counters to match existing data: ran one-time script to set lastValue = max(existing invoice/PO numbers) per tenant.
+- Replaced check-then-write in stock-movement.service.ts recordMovement:
+  - Outbound (SALE/TRANSFER_OUT/negative ADJUSTMENT): atomic conditional UPDATE (updateMany WHERE quantity >= absDelta). If 0 rows affected → race condition detected → throw InsufficientStockError. No gap between read and write.
+  - Inbound (RECEIPT/TRANSFER_IN/positive ADJUSTMENT): unchanged upsert pattern.
+- Rebuilt EgyptPayrollRuleProvider with 7 progressive annual tax brackets per Law 7/2024:
+  - 0% up to 40,000 EGP/year
+  - 10% on 40,001–55,000
+  - 15% on 55,001–70,000
+  - 20% on 70,001–200,000
+  - 22.5% on 200,001–400,000
+  - 25% on 400,001–1,200,000
+  - 27.5% above 1,200,000
+  - Social insurance: employee 11% / employer 19%, capped at 10,500 EGP/month
+  - Tax calculated ANNUALLY then divided by 12 (not monthly brackets)
+  - All numbers in named constants with ⚠️ "verify with certified accountant" comment
+- Added 4 production hardening tests (26 total): ALL PASS
+
+Stage Summary:
+- All 26 tests PASS (22 existing + 4 new):
+  23. sequence-concurrency-unique: PASS — 5 concurrent calls → values [1,2,3,4,5], all unique
+  24. stock-concurrency-one-succeeds: PASS — 2 concurrent sales × 13 units (stock=13), one fulfilled + one rejected, stock delta=13 (correct)
+  25. payroll-tax-7-brackets-accurate: PASS — 15,000 EGP/month: insurance=1155 (11% of capped 10500), tax=1914.83 (annual 22978/12), net=11930.17 — all match manual calculation
+  26. rls-sql-complete: PASS — RLS SQL file covers all 14 tenant-scoped tables, has ENABLE+FORCE+POLICY
+- Lint clean
+- PostgreSQL migration steps documented in prisma/sql/tenant_rls_postgres.sql

@@ -18,6 +18,7 @@ import { requirePermission } from '@/core/rbac'
 import { getTenantContext } from '@/core/tenancy/context'
 import { prepareJournalEntry, createJournalEntryOn, type JournalEntryInput } from '@/core/ledger/journal-entry.service'
 import { getTaxProvider, type TaxResult } from '@/core/ledger/tax-provider'
+import { getNextSequenceValue, formatSequenceNumber } from '@/core/sequence/service'
 import { InvoiceStateError, InvoiceConfigError } from '@/lib/api'
 import type { Invoice, InvoiceLine, Prisma } from '@prisma/client'
 
@@ -75,17 +76,17 @@ async function resolvePostingAccounts(
  * Generate the next sequential invoice number for the current tenant.
  * Format: INV-0001, INV-0002, ...
  *
+ * Production Hardening: uses the atomic SequenceCounter (UPDATE...RETURNING)
+ * instead of the old count()+1 pattern. This is race-free under concurrency.
+ *
  * Accepts an optional client (tx or db) + tenantId. When using tx, the
  * tenantId MUST be passed explicitly (tx has no middleware).
  */
 async function nextInvoiceNumber(
-  client: Prisma.TransactionClient | typeof db = db,
-  tenantId?: string
+  client: Prisma.TransactionClient | typeof db = db
 ): Promise<string> {
-  const where = tenantId ? { tenantId } : {}
-  const count = await (client as typeof db).invoice.count({ where })
-  const n = count + 1
-  return `INV-${String(n).padStart(4, '0')}`
+  const value = await getNextSequenceValue('invoice', client)
+  return formatSequenceNumber('INV', value)
 }
 
 // ---------- CRUD: DRAFT ----------
@@ -147,7 +148,7 @@ export async function createInvoice(
   if (!ctx) throw new Error('No tenant context')
 
   const client = tx ?? db
-  const number = await nextInvoiceNumber(client, ctx.tenantId)
+  const number = await nextInvoiceNumber(client)
 
   const invoice = await (client as typeof db).invoice.create({
     data: {

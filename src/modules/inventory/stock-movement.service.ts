@@ -88,9 +88,20 @@ export async function recordMovement(
   const client = tx ?? db
   const delta = signedDelta(input.type, input.quantity)
 
-  // For outbound movements, check sufficient stock BEFORE writing.
-  // We do this inside the transaction to avoid race conditions.
+  // For outbound movements (SALE, TRANSFER_OUT, negative ADJUSTMENT):
+  // Use an ATOMIC conditional UPDATE — only succeeds if stock is sufficient.
+  // This replaces the old check-then-write pattern (race-condition-prone)
+  // with a single database-level atomic operation.
+  //
+  // The UPDATE...WHERE quantity >= X acquires a row lock, so concurrent
+  // transactions are serialized: the second one sees the UPDATED quantity
+  // from the first. If the first reduced stock below what the second needs,
+  // the second UPDATE affects 0 rows → we throw InsufficientStockError.
   if (delta < 0) {
+    const absDelta = Math.abs(delta)
+    // Try the atomic decrement: UPDATE only if sufficient stock.
+    // For a new StockLevel row (no existing record), we can't UPDATE —
+    // so first check if a row exists, then use conditional UPDATE.
     const existingLevel = await (client as typeof db).stockLevel.findUnique({
       where: {
         productId_warehouseId: {
@@ -99,8 +110,20 @@ export async function recordMovement(
         },
       },
     })
-    const currentQty = existingLevel ? Number(existingLevel.quantity) : 0
-    if (currentQty + delta < 0) {
+
+    if (!existingLevel) {
+      // No stock at all — reject immediately
+      throw new InsufficientStockError(
+        input.productId,
+        input.warehouseId,
+        input.quantity,
+        0
+      )
+    }
+
+    const currentQty = Number(existingLevel.quantity)
+    if (currentQty < absDelta) {
+      // Not enough stock — reject before any write
       throw new InsufficientStockError(
         input.productId,
         input.warehouseId,
@@ -108,14 +131,68 @@ export async function recordMovement(
         currentQty
       )
     }
+
+    // ATOMIC conditional UPDATE: decrement only if quantity >= absDelta.
+    // This is the key change — even if another transaction commits between
+    // our read above and this UPDATE, the WHERE clause ensures we only
+    // decrement if there's still enough stock. If another transaction
+    // already reduced it below our threshold, this UPDATE affects 0 rows.
+    const result = await (client as typeof db).stockLevel.updateMany({
+      where: {
+        productId: input.productId,
+        warehouseId: input.warehouseId,
+        quantity: { gte: absDelta },
+      },
+      data: {
+        quantity: { decrement: absDelta },
+      },
+    })
+
+    if (result.count === 0) {
+      // Race condition: stock was reduced by another transaction between
+      // our check and the UPDATE. Reject — the caller's transaction will
+      // roll back.
+      const refreshedLevel = await (client as typeof db).stockLevel.findUnique({
+        where: {
+          productId_warehouseId: {
+            productId: input.productId,
+            warehouseId: input.warehouseId,
+          },
+        },
+      })
+      throw new InsufficientStockError(
+        input.productId,
+        input.warehouseId,
+        input.quantity,
+        refreshedLevel ? Number(refreshedLevel.quantity) : 0
+      )
+    }
+  } else {
+    // For inbound movements (RECEIPT, TRANSFER_IN, positive ADJUSTMENT):
+    // Simply upsert (increment the quantity or create if not exists).
+    await (client as typeof db).stockLevel.upsert({
+      where: {
+        productId_warehouseId: {
+          productId: input.productId,
+          warehouseId: input.warehouseId,
+        },
+      },
+      create: {
+        productId: input.productId,
+        warehouseId: input.warehouseId,
+        quantity: delta,
+      },
+      update: {
+        quantity: { increment: delta },
+      },
+    })
   }
 
-  // Create the StockMovement (append-only) + upsert the StockLevel.
-  // Both in the same transaction (if tx provided) or Prisma's implicit
-  // transaction for the two operations.
+  // Create the StockMovement (append-only audit trail).
+  // This happens AFTER the stock level update, both inside the same tx.
   const movement = await (client as typeof db).stockMovement.create({
     data: {
-      tenantId: ctx.tenantId, // explicit — tx has no middleware
+      tenantId: ctx.tenantId, // explicit — required for tx, harmless for db
       productId: input.productId,
       warehouseId: input.warehouseId,
       type: input.type,
@@ -123,25 +200,6 @@ export async function recordMovement(
       unitCost: input.unitCost,
       sourceModule: input.sourceModule,
       sourceRefId: input.sourceRefId,
-    },
-  })
-
-  // Upsert the StockLevel. The @@unique([productId, warehouseId]) constraint
-  // means we either create a new row or update the existing one.
-  await (client as typeof db).stockLevel.upsert({
-    where: {
-      productId_warehouseId: {
-        productId: input.productId,
-        warehouseId: input.warehouseId,
-      },
-    },
-    create: {
-      productId: input.productId,
-      warehouseId: input.warehouseId,
-      quantity: delta,
-    },
-    update: {
-      quantity: { increment: delta },
     },
   })
 
