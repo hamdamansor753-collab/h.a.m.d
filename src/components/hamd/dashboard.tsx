@@ -69,12 +69,13 @@ export function Dashboard({ user, locale, onLocaleChange, onLogout }: Props) {
 
   const navGroups: NavGroup[] = [
     {
+      label: t('nav.group.operations'),
       items: [
         { key: 'pos',          label: t('nav.pos'),          icon: Monitor,        permitted: user.permissionKeys.includes('pos:sell') },
       ],
     },
     {
-      label: t('nav.accounts'),
+      label: t('nav.group.accounting'),
       items: [
         { key: 'accounts',     label: t('nav.accounts'),     icon: BookOpen,       permitted: user.permissionKeys.includes('account:read') },
         { key: 'journal',      label: t('nav.journal'),      icon: FileText,       permitted: user.permissionKeys.includes('journal:read') },
@@ -82,23 +83,28 @@ export function Dashboard({ user, locale, onLocaleChange, onLogout }: Props) {
       ],
     },
     {
-      label: t('nav.inventory'),
+      label: t('nav.group.inventory'),
       items: [
         { key: 'inventory',    label: t('nav.inventory'),    icon: Package,        permitted: user.permissionKeys.includes('inventory:read') },
         { key: 'purchases',    label: t('nav.purchases'),    icon: ShoppingCart,   permitted: user.permissionKeys.includes('inventory:read') },
+      ],
+    },
+    {
+      label: t('nav.group.customers'),
+      items: [
         { key: 'crm',          label: t('nav.crm'),          icon: Users,          permitted: user.permissionKeys.includes('crm:read') },
         { key: 'appointments', label: t('nav.appointments'), icon: CalendarClock,  permitted: user.permissionKeys.includes('crm:read') },
       ],
     },
     {
-      label: t('nav.hr'),
+      label: t('nav.group.hr'),
       items: [
-        { key: 'hr',           label: t('nav.hr'),           icon: Users,          permitted: user.permissionKeys.includes('hr:read') },
+        { key: 'hr',           label: t('nav.employees'),    icon: Users,          permitted: user.permissionKeys.includes('hr:read') },
         { key: 'payroll',      label: t('nav.payroll'),      icon: Wallet,         permitted: user.permissionKeys.includes('hr:read') },
       ],
     },
     {
-      label: t('nav.branding'),
+      label: t('nav.group.system'),
       items: [
         { key: 'reports',      label: t('nav.reports'),      icon: BarChart3,      permitted: user.permissionKeys.includes('journal:read') },
         { key: 'branding',     label: t('nav.branding'),     icon: Palette,        permitted: user.permissionKeys.includes('tenant:manage') },
