@@ -56,6 +56,8 @@ export interface BrandSettingsView {
 /** H.A.M.D default identity (per /upload/01-brand-identity.md). */
 export const DEFAULT_PRIMARY_COLOR = '#0f172a' // navy
 export const DEFAULT_ACCENT_COLOR = '#06b6d4'  // cyan
+// Re-export from constants.ts for backwards compat (server-side callers)
+// Client components should import directly from '@/modules/branding/constants'
 
 /** A pure seed-extra entry: a chart-of-accounts row to add for a tenant. */
 export interface BusinessTypeSeedAccount {

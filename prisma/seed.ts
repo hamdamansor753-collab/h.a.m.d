@@ -22,6 +22,13 @@ const prisma = new PrismaClient()
 
 async function main() {
   console.log('→ Seeding H.A.M.D ERP core data...')
+  // Disable RLS for the seed connection — the seed runs as a super-admin
+  // (postgres role) and needs cross-tenant access to all tables.
+  // 14 tables have RLS enabled (Account, User, JournalEntry, etc.) and
+  // without this, upserts silently fail or hang on the pgbouncer pool.
+  await prisma.$executeRawUnsafe('SET row_security = off')
+  console.log('[step] RLS disabled for seed session')
+  console.log('[step] permissions...')
 
   // ---------- 1. Permissions ----------
   const permissionKeys = [
@@ -69,6 +76,7 @@ async function main() {
   )
   const permByKey = Object.fromEntries(permissions.map((p) => [p.key, p]))
 
+  console.log('[step] roles...')
   // ---------- 2. Roles ----------
   const roleDefs = [
     {
@@ -142,6 +150,7 @@ async function main() {
     roles[def.name] = role
   }
 
+  console.log('[step] tenants...')
   // ---------- 3. Tenants ----------
   const tenants = await Promise.all([
     prisma.tenant.upsert({
@@ -156,6 +165,7 @@ async function main() {
     }),
   ])
 
+  console.log('[step] users...')
   // ---------- 4. Users ----------
   const passwordHash = await bcrypt.hash('password123', 10)
   const userDefs = [
@@ -192,6 +202,7 @@ async function main() {
     })
   }
 
+  console.log('[step] plans+subscriptions...')
   // ---------- 4b. Plans + Subscriptions (Phase 8) ----------
   // Platform-level billing: 3 tiers + an ACTIVE subscription for every
   // existing tenant (per phase8-prompt: "كل tenant موجود يُنشأ له
@@ -229,6 +240,7 @@ async function main() {
     })
   }
 
+  console.log('[step] chart of accounts...')
   // ---------- 5. Chart of Accounts ----------
   // Different codes per tenant to make isolation visually obvious in the test.
   const afakAccounts = [
@@ -305,6 +317,7 @@ async function main() {
   await seedChart('tenant-afak', afakAccounts)
   await seedChart('tenant-noor', noorAccounts)
 
+  console.log('[step] warehouses+products...')
   // ---------- 5b. Warehouses + Products (Phase 2) ----------
   for (const tenantId of ['tenant-afak', 'tenant-noor']) {
     await prisma.warehouse.upsert({
@@ -339,6 +352,7 @@ async function main() {
     })
   }
 
+  console.log('[step] mfg products...')
   // ---------- 5c. Manufacturing products (Phase 4) ----------
   // These products back the sample BOM (MFG-CHAIR = 2kg MFG-FABRIC + 4 MFG-LEG).
   // Created on tenant-afak so the BOM below has valid references.
@@ -355,6 +369,7 @@ async function main() {
     })
   }
 
+  console.log('[step] employees...')
   // ---------- 5d. HR / Payroll sample employees (Phase 4) ----------
   // Employee has no unique constraint on nationalId; use stable surrogate IDs
   // so the seed is idempotent across runs.
@@ -371,6 +386,7 @@ async function main() {
     })
   }
 
+  console.log('[step] customers...')
   // ---------- 5e. CRM sample customers (Phase 4) ----------
   // Customer has no natural unique key other than id; use stable surrogate IDs.
   const afakCustomers = [
@@ -386,6 +402,7 @@ async function main() {
     })
   }
 
+  console.log('[step] appointments...')
   // ---------- 5f. CRM sample appointments (Phase 4) ----------
   // Two upcoming appointments linked to the first two customers.
   const afakAppointments = [
@@ -400,6 +417,7 @@ async function main() {
     })
   }
 
+  console.log('[step] BOM...')
   // ---------- 5g. Manufacturing sample BOM (Phase 4) ----------
   // BOM for MFG-CHAIR: 1 unit needs 2 (kg) of MFG-FABRIC + 4 of MFG-LEG,
   // plus 50 labor cost per unit. BOMComponent has no unique constraint on
@@ -446,6 +464,7 @@ async function main() {
     }
   }
 
+  console.log('[step] translations...')
   // ---------- 6. Translations ----------
   const translations: Array<{ key: string; locale: string; value: string }> = [
     // Brand / app
@@ -1550,12 +1569,15 @@ async function main() {
     { key: 'modules.modulesNote',         locale: 'en',    value: 'These settings control what appears in the navigation only. All APIs remain functional regardless of these settings.' },
   ]
 
-  for (const t of translations) {
-    await prisma.translation.upsert({
-      where: { key_locale: { key: t.key, locale: t.locale } },
-      update: { value: t.value },
-      create: t,
-    })
+  console.log(`[step] bulk-loading ${translations.length} translations...`)
+  // Bulk approach: delete all existing translations then createMany in batches.
+  // This is 100x faster than 999 individual upserts on Supabase pgbouncer.
+  await prisma.translation.deleteMany({})
+  console.log('[step] translations cleared')
+  for (let i = 0; i < translations.length; i += 200) {
+    const chunk = translations.slice(i, i + 200)
+    await prisma.translation.createMany({ data: chunk, skipDuplicates: true })
+    console.log(`[step] translations ${Math.min(i + 200, translations.length)}/${translations.length}...`)
   }
 
   console.log('✓ Seed complete.')

@@ -34,7 +34,7 @@ import { toast } from 'sonner'
 import {
   DEFAULT_PRIMARY_COLOR,
   DEFAULT_ACCENT_COLOR,
-} from '@/modules/branding/branding.service'
+} from '@/modules/branding/constants'
 
 // ---------- Types ----------
 
