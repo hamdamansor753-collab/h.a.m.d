@@ -24,7 +24,7 @@ export async function POST(
     const { id } = await params
     const result = await withTenantContext(async () => {
       return postInvoice(id)
-    })
+    }, 'POST')
     if (result.status === 401) return ok({ authenticated: false }, 401)
     return ok(result)
   } catch (err) {

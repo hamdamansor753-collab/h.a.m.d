@@ -43,7 +43,7 @@ export async function POST(req: Request) {
           warehouseId: l.warehouseId,
         })),
       })
-    )
+    , 'POST')
     if (result.status === 401) return ok({ authenticated: false }, 401)
     return ok(result, 201)
   } catch (err) {

@@ -51,7 +51,7 @@ export async function POST(req: Request) {
     }
     const result = await withTenantContext(async () => {
       return createJournalEntry(data)
-    })
+    }, 'POST')
     if (result.status === 401) return ok({ authenticated: false }, 401)
     return ok(result, 201)
   } catch (err) {

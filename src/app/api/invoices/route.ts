@@ -44,7 +44,7 @@ export async function POST(req: Request) {
           taxRate: l.taxRate,
         })),
       })
-    })
+    }, 'POST')
     // NOTE: use `result.status === 401` not `'status' in result` — the invoice
     // object has a `status` field (InvoiceStatus) that would false-positive.
     if (result.status === 401) return ok({ authenticated: false }, 401)

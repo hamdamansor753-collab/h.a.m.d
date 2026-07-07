@@ -1,0 +1,839 @@
+     1→/**
+     2→ * H.A.M.D ERP — Seed (Phase 0)
+     3→ *
+     4→ * Creates:
+     5→ *  - 3 roles: admin, accountant, viewer (with permissions)
+     6→ *  - 2 tenants (Tenant A "شركة الأفق", Tenant B "شركة النور") so we can
+     7→ *    DEMONSTRATE cross-tenant isolation in the test endpoint.
+     8→ *  - For each tenant: admin / accountant / viewer users (password = "password123")
+     9→ *  - A starter chart of accounts per tenant (different codes per tenant to
+    10→ *    make the isolation test visually obvious).
+    11→ *  - UI translations for ar-EG, ar-SA, en.
+    12→ *
+    13→ * Run with: `bun run db:seed`
+    14→ */
+    15→import { PrismaClient, AccountType } from '@prisma/client'
+    16→import bcrypt from 'bcryptjs'
+    17→
+    18→const prisma = new PrismaClient()
+    19→
+    20→async function main() {
+    21→  console.log('→ Seeding H.A.M.D ERP core data...')
+    22→
+    23→  // ---------- 1. Permissions ----------
+    24→  const permissionKeys = [
+    25→    'account:read',
+    26→    'account:create',
+    27→    'account:update',
+    28→    'journal:read',
+    29→    'journal:create',
+    30→    'journal:void',
+    31→    'user:read',
+    32→    'tenant:manage',
+    33→    // Phase 1: invoice + system:test
+    34→    'invoice:create',
+    35→    'invoice:read',
+    36→    'invoice:post',
+    37→    'invoice:void',
+    38→    'system:test',
+    39→    // Phase 2: inventory + purchase
+    40→    'inventory:read',
+    41→    'inventory:adjust',
+    42→    'purchase:create',
+    43→    'purchase:receive',
+    44→    // Phase 3: POS
+    45→    'pos:sell',
+    46→  ]
+    47→  const permissions = await Promise.all(
+    48→    permissionKeys.map((key) =>
+    49→      prisma.permission.upsert({
+    50→        where: { key },
+    51→        update: {},
+    52→        create: { key },
+    53→      })
+    54→    )
+    55→  )
+    56→  const permByKey = Object.fromEntries(permissions.map((p) => [p.key, p]))
+    57→
+    58→  // ---------- 2. Roles ----------
+    59→  const roleDefs = [
+    60→    {
+    61→      name: 'admin',
+    62→      perms: [
+    63→        'account:read', 'account:create', 'account:update',
+    64→        'journal:read', 'journal:create', 'journal:void',
+    65→        'user:read', 'tenant:manage',
+    66→        'invoice:create', 'invoice:read', 'invoice:post', 'invoice:void',
+    67→        'system:test',
+    68→        'inventory:read', 'inventory:adjust',
+    69→        'purchase:create', 'purchase:receive',
+    70→        'pos:sell',
+    71→      ],
+    72→    },
+    73→    {
+    74→      name: 'accountant',
+    75→      perms: [
+    76→        'account:read', 'account:create', 'account:update',
+    77→        'journal:read', 'journal:create',
+    78→        'invoice:create', 'invoice:read', 'invoice:post',
+    79→        'inventory:read',
+    80→        'purchase:create', 'purchase:receive',
+    81→      ],
+    82→    },
+    83→    {
+    84→      name: 'cashier',
+    85→      perms: ['pos:sell', 'invoice:read', 'inventory:read'],
+    86→    },
+    87→    {
+    88→      name: 'viewer',
+    89→      perms: ['account:read', 'journal:read', 'invoice:read', 'inventory:read'],
+    90→    },
+    91→  ]
+    92→  const roles: Record<string, { id: string }> = {}
+    93→  for (const def of roleDefs) {
+    94→    // Upsert the role, then sync permissions (connect new + disconnect stale).
+    95→    // The `update: {}` pattern from Phase 0 did NOT reconnect permissions on
+    96→    // existing roles — so adding invoice:* perms in Phase 1 would be silently
+    97→    // ignored on re-seed. We now explicitly sync the permission set.
+    98→    const role = await prisma.role.upsert({
+    99→      where: { name: def.name },
+   100→      update: {},
+   101→      create: {
+   102→        name: def.name,
+   103→        permissions: { connect: def.perms.map((k) => ({ id: permByKey[k].id })) },
+   104→      },
+   105→      include: { permissions: true },
+   106→    })
+   107→    // Sync permissions: connect any that are missing.
+   108→    const existingPermIds = new Set(role.permissions.map((p) => p.id))
+   109→    const toConnect = def.perms.filter((k) => !existingPermIds.has(permByKey[k].id))
+   110→    if (toConnect.length > 0) {
+   111→      await prisma.role.update({
+   112→        where: { id: role.id },
+   113→        data: {
+   114→          permissions: { connect: toConnect.map((k) => ({ id: permByKey[k].id })) },
+   115→        },
+   116→      })
+   117→    }
+   118→    roles[def.name] = role
+   119→  }
+   120→
+   121→  // ---------- 3. Tenants ----------
+   122→  const tenants = await Promise.all([
+   123→    prisma.tenant.upsert({
+   124→      where: { id: 'tenant-afak' },
+   125→      update: {},
+   126→      create: { id: 'tenant-afak', name: 'شركة الأفق للتجارة', defaultLocale: 'ar-EG', country: 'EG' },
+   127→    }),
+   128→    prisma.tenant.upsert({
+   129→      where: { id: 'tenant-noor' },
+   130→      update: {},
+   131→      create: { id: 'tenant-noor', name: 'شركة النور للتجارة', defaultLocale: 'ar-SA', country: 'SA' },
+   132→    }),
+   133→  ])
+   134→
+   135→  // ---------- 4. Users ----------
+   136→  const passwordHash = await bcrypt.hash('password123', 10)
+   137→  const userDefs = [
+   138→    { email: 'admin@afak.test',     name: 'مدير الأفق',   tenantId: 'tenant-afak', role: 'admin' },
+   139→    { email: 'accountant@afak.test',name: 'محاسب الأفق',  tenantId: 'tenant-afak', role: 'accountant' },
+   140→    { email: 'cashier@afak.test',   name: 'كاشير الأفق',  tenantId: 'tenant-afak', role: 'cashier' },
+   141→    { email: 'viewer@afak.test',    name: 'مشاهد الأفق',  tenantId: 'tenant-afak', role: 'viewer' },
+   142→    { email: 'admin@noor.test',     name: 'مدير النور',   tenantId: 'tenant-noor', role: 'admin' },
+   143→    { email: 'accountant@noor.test',name: 'محاسب النور',  tenantId: 'tenant-noor', role: 'accountant' },
+   144→  ]
+   145→  for (const u of userDefs) {
+   146→    const user = await prisma.user.upsert({
+   147→      where: { tenantId_email: { tenantId: u.tenantId, email: u.email } },
+   148→      update: { passwordHash },
+   149→      create: {
+   150→        tenantId: u.tenantId,
+   151→        email: u.email,
+   152→        name: u.name,
+   153→        passwordHash,
+   154→        locale: tenants.find((t) => t.id === u.tenantId)!.defaultLocale,
+   155→        roles: { create: { roleId: roles[u.role].id } },
+   156→      },
+   157→    })
+   158→    // Ensure role link exists even on update
+   159→    await prisma.userRole.upsert({
+   160→      where: { userId_roleId: { userId: user.id, roleId: roles[u.role].id } },
+   161→      update: {},
+   162→      create: { userId: user.id, roleId: roles[u.role].id },
+   163→    })
+   164→  }
+   165→
+   166→  // ---------- 5. Chart of Accounts ----------
+   167→  // Different codes per tenant to make isolation visually obvious in the test.
+   168→  const afakAccounts = [
+   169→    { code: '1000', nameKey: 'account.assets',    type: AccountType.ASSET,     parentId: null },
+   170→    { code: '1001', nameKey: 'account.cash',      type: AccountType.ASSET,     parentCode: '1000' },
+   171→    { code: '1002', nameKey: 'account.bank',      type: AccountType.ASSET,     parentCode: '1000' },
+   172→    { code: '1003', nameKey: 'account.receivable', type: AccountType.ASSET,    parentCode: '1000' },
+   173→    { code: '1004', nameKey: 'account.inventory', type: AccountType.ASSET,     parentCode: '1000' },
+   174→    { code: '2000', nameKey: 'account.liabilities',type: AccountType.LIABILITY, parentId: null },
+   175→    { code: '2001', nameKey: 'account.salesTax',  type: AccountType.LIABILITY, parentCode: '2000' },
+   176→    { code: '2002', nameKey: 'account.payable',   type: AccountType.LIABILITY, parentCode: '2000' },
+   177→    { code: '3000', nameKey: 'account.equity',    type: AccountType.EQUITY,    parentId: null },
+   178→    { code: '4000', nameKey: 'account.revenue',   type: AccountType.REVENUE,   parentId: null },
+   179→    { code: '5000', nameKey: 'account.expense',   type: AccountType.EXPENSE,   parentId: null },
+   180→    { code: '5001', nameKey: 'account.cogs',      type: AccountType.EXPENSE,   parentCode: '5000' },
+   181→  ]
+   182→  const noorAccounts = [
+   183→    { code: '1100', nameKey: 'account.assets',    type: AccountType.ASSET,     parentId: null },
+   184→    { code: '1101', nameKey: 'account.cash',      type: AccountType.ASSET,     parentCode: '1100' },
+   185→    { code: '1102', nameKey: 'account.receivable', type: AccountType.ASSET,    parentCode: '1100' },
+   186→    { code: '1103', nameKey: 'account.inventory', type: AccountType.ASSET,     parentCode: '1100' },
+   187→    { code: '2100', nameKey: 'account.liabilities',type: AccountType.LIABILITY, parentId: null },
+   188→    { code: '2101', nameKey: 'account.salesTax',  type: AccountType.LIABILITY, parentCode: '2100' },
+   189→    { code: '2102', nameKey: 'account.payable',   type: AccountType.LIABILITY, parentCode: '2100' },
+   190→    { code: '3100', nameKey: 'account.equity',    type: AccountType.EQUITY,    parentId: null },
+   191→    { code: '4100', nameKey: 'account.revenue',   type: AccountType.REVENUE,   parentId: null },
+   192→    { code: '5100', nameKey: 'account.expense',   type: AccountType.EXPENSE,   parentId: null },
+   193→    { code: '5101', nameKey: 'account.cogs',      type: AccountType.EXPENSE,   parentCode: '5100' },
+   194→  ]
+   195→
+   196→  async function seedChart(tenantId: string, accounts: Array<{ code: string; nameKey: string; type: AccountType; parentId?: string | null; parentCode?: string }>) {
+   197→    const codeToId: Record<string, string> = {}
+   198→    // First pass: parents
+   199→    for (const a of accounts.filter((x) => !x.parentCode)) {
+   200→      const acc = await prisma.account.upsert({
+   201→        where: { tenantId_code: { tenantId, code: a.code } },
+   202→        update: { nameKey: a.nameKey, type: a.type },
+   203→        create: { tenantId, code: a.code, nameKey: a.nameKey, type: a.type, parentId: null },
+   204→      })
+   205→      codeToId[a.code] = acc.id
+   206→    }
+   207→    // Second pass: children
+   208→    for (const a of accounts.filter((x) => x.parentCode)) {
+   209→      const acc = await prisma.account.upsert({
+   210→        where: { tenantId_code: { tenantId, code: a.code } },
+   211→        update: { nameKey: a.nameKey, type: a.type, parentId: codeToId[a.parentCode!] },
+   212→        create: { tenantId, code: a.code, nameKey: a.nameKey, type: a.type, parentId: codeToId[a.parentCode!] },
+   213→      })
+   214→      codeToId[a.code] = acc.id
+   215→    }
+   216→  }
+   217→  await seedChart('tenant-afak', afakAccounts)
+   218→  await seedChart('tenant-noor', noorAccounts)
+   219→
+   220→  // ---------- 5b. Warehouses + Products (Phase 2) ----------
+   221→  for (const tenantId of ['tenant-afak', 'tenant-noor']) {
+   222→    await prisma.warehouse.upsert({
+   223→      where: { id: `${tenantId}-wh-main` },
+   224→      update: {},
+   225→      create: { id: `${tenantId}-wh-main`, tenantId, nameKey: 'warehouse.main', isDefault: true },
+   226→    })
+   227→  }
+   228→
+   229→  // Sample products per tenant (different SKUs to make isolation visible)
+   230→  const afakProducts = [
+   231→    { sku: 'PROD-001', nameKey: 'product.laptop',     sellPrice: 15000 },
+   232→    { sku: 'PROD-002', nameKey: 'product.mouse',      sellPrice: 250 },
+   233→    { sku: 'PROD-003', nameKey: 'product.keyboard',   sellPrice: 450 },
+   234→  ]
+   235→  const noorProducts = [
+   236→    { sku: 'ITEM-101', nameKey: 'product.laptop',     sellPrice: 16000 },
+   237→    { sku: 'ITEM-102', nameKey: 'product.mouse',      sellPrice: 300 },
+   238→  ]
+   239→  for (const p of afakProducts) {
+   240→    await prisma.product.upsert({
+   241→      where: { tenantId_sku: { tenantId: 'tenant-afak', sku: p.sku } },
+   242→      update: { nameKey: p.nameKey, sellPrice: p.sellPrice },
+   243→      create: { tenantId: 'tenant-afak', sku: p.sku, nameKey: p.nameKey, sellPrice: p.sellPrice, costPrice: 0 },
+   244→    })
+   245→  }
+   246→  for (const p of noorProducts) {
+   247→    await prisma.product.upsert({
+   248→      where: { tenantId_sku: { tenantId: 'tenant-noor', sku: p.sku } },
+   249→      update: { nameKey: p.nameKey, sellPrice: p.sellPrice },
+   250→      create: { tenantId: 'tenant-noor', sku: p.sku, nameKey: p.nameKey, sellPrice: p.sellPrice, costPrice: 0 },
+   251→    })
+   252→  }
+   253→
+   254→  // ---------- 6. Translations ----------
+   255→  const translations: Array<{ key: string; locale: string; value: string }> = [
+   256→    // Brand / app
+   257→    { key: 'app.name',           locale: 'ar-EG', value: 'H.A.M.D ERP' },
+   258→    { key: 'app.name',           locale: 'ar-SA', value: 'H.A.M.D ERP' },
+   259→    { key: 'app.name',           locale: 'en',    value: 'H.A.M.D ERP' },
+   260→    { key: 'app.tagline',        locale: 'ar-EG', value: 'نظام تخطيط موارد المؤسسات' },
+   261→    { key: 'app.tagline',        locale: 'ar-SA', value: 'نظام تخطيط موارد المنشأة' },
+   262→    { key: 'app.tagline',        locale: 'en',    value: 'Enterprise Resource Planning' },
+   263→
+   264→    // Auth
+   265→    { key: 'auth.login',         locale: 'ar-EG', value: 'تسجيل الدخول' },
+   266→    { key: 'auth.login',         locale: 'ar-SA', value: 'تسجيل الدخول' },
+   267→    { key: 'auth.login',         locale: 'en',    value: 'Sign in' },
+   268→    { key: 'auth.logout',        locale: 'ar-EG', value: 'تسجيل الخروج' },
+   269→    { key: 'auth.logout',        locale: 'ar-SA', value: 'تسجيل الخروج' },
+   270→    { key: 'auth.logout',        locale: 'en',    value: 'Sign out' },
+   271→    { key: 'auth.email',         locale: 'ar-EG', value: 'البريد الإلكتروني' },
+   272→    { key: 'auth.email',         locale: 'ar-SA', value: 'البريد الإلكتروني' },
+   273→    { key: 'auth.email',         locale: 'en',    value: 'Email' },
+   274→    { key: 'auth.password',      locale: 'ar-EG', value: 'كلمة المرور' },
+   275→    { key: 'auth.password',      locale: 'ar-SA', value: 'كلمة المرور' },
+   276→    { key: 'auth.password',      locale: 'en',    value: 'Password' },
+   277→    { key: 'auth.signInBtn',     locale: 'ar-EG', value: 'دخول' },
+   278→    { key: 'auth.signInBtn',     locale: 'ar-SA', value: 'دخول' },
+   279→    { key: 'auth.signInBtn',     locale: 'en',    value: 'Sign in' },
+   280→    { key: 'auth.invalidCreds',  locale: 'ar-EG', value: 'بيانات الدخول غير صحيحة' },
+   281→    { key: 'auth.invalidCreds',  locale: 'ar-SA', value: 'بيانات الدخول غير صحيحة' },
+   282→    { key: 'auth.invalidCreds',  locale: 'en',    value: 'Invalid credentials' },
+   283→    { key: 'auth.demoAccounts',  locale: 'ar-EG', value: 'حسابات تجريبية' },
+   284→    { key: 'auth.demoAccounts',  locale: 'ar-SA', value: 'حسابات تجريبية' },
+   285→    { key: 'auth.demoAccounts',  locale: 'en',    value: 'Demo accounts' },
+   286→
+   287→    // Nav
+   288→    { key: 'nav.accounts',       locale: 'ar-EG', value: 'شجرة الحسابات' },
+   289→    { key: 'nav.accounts',       locale: 'ar-SA', value: 'شجرة الحسابات' },
+   290→    { key: 'nav.accounts',       locale: 'en',    value: 'Chart of Accounts' },
+   291→    { key: 'nav.journal',        locale: 'ar-EG', value: 'القيود اليومية' },
+   292→    { key: 'nav.journal',        locale: 'ar-SA', value: 'القيود اليومية' },
+   293→    { key: 'nav.journal',        locale: 'en',    value: 'Journal Entries' },
+   294→    { key: 'nav.tests',          locale: 'ar-EG', value: 'اختبارات الأمان' },
+   295→    { key: 'nav.tests',          locale: 'ar-SA', value: 'اختبارات الأمان' },
+   296→    { key: 'nav.tests',          locale: 'en',    value: 'Security Tests' },
+   297→
+   298→    // Accounts
+   299→    { key: 'account.assets',     locale: 'ar-EG', value: 'الأصول' },
+   300→    { key: 'account.assets',     locale: 'ar-SA', value: 'الأصول' },
+   301→    { key: 'account.assets',     locale: 'en',    value: 'Assets' },
+   302→    { key: 'account.cash',       locale: 'ar-EG', value: 'النقدية' },
+   303→    { key: 'account.cash',       locale: 'ar-SA', value: 'النقدية' },
+   304→    { key: 'account.cash',       locale: 'en',    value: 'Cash' },
+   305→    { key: 'account.bank',       locale: 'ar-EG', value: 'البنك' },
+   306→    { key: 'account.bank',       locale: 'ar-SA', value: 'البنك' },
+   307→    { key: 'account.bank',       locale: 'en',    value: 'Bank' },
+   308→    { key: 'account.liabilities',locale: 'ar-EG', value: 'الخصوم' },
+   309→    { key: 'account.liabilities',locale: 'ar-SA', value: 'الالتزامات' },
+   310→    { key: 'account.liabilities',locale: 'en',    value: 'Liabilities' },
+   311→    { key: 'account.equity',     locale: 'ar-EG', value: 'حقوق الملكية' },
+   312→    { key: 'account.equity',     locale: 'ar-SA', value: 'حقوق الملكية' },
+   313→    { key: 'account.equity',     locale: 'en',    value: 'Equity' },
+   314→    { key: 'account.revenue',    locale: 'ar-EG', value: 'الإيرادات' },
+   315→    { key: 'account.revenue',    locale: 'ar-SA', value: 'الإيرادات' },
+   316→    { key: 'account.revenue',    locale: 'en',    value: 'Revenue' },
+   317→    { key: 'account.expense',    locale: 'ar-EG', value: 'المصروفات' },
+   318→    { key: 'account.expense',    locale: 'ar-SA', value: 'المصروفات' },
+   319→    { key: 'account.expense',    locale: 'en',    value: 'Expenses' },
+   320→    { key: 'account.code',       locale: 'ar-EG', value: 'الرمز' },
+   321→    { key: 'account.code',       locale: 'ar-SA', value: 'الرمز' },
+   322→    { key: 'account.code',       locale: 'en',    value: 'Code' },
+   323→    { key: 'account.name',       locale: 'ar-EG', value: 'الاسم' },
+   324→    { key: 'account.name',       locale: 'ar-SA', value: 'الاسم' },
+   325→    { key: 'account.name',       locale: 'en',    value: 'Name' },
+   326→    { key: 'account.type',       locale: 'ar-EG', value: 'النوع' },
+   327→    { key: 'account.type',       locale: 'ar-SA', value: 'النوع' },
+   328→    { key: 'account.type',       locale: 'en',    value: 'Type' },
+   329→    { key: 'account.create',     locale: 'ar-EG', value: 'إضافة حساب' },
+   330→    { key: 'account.create',     locale: 'ar-SA', value: 'إضافة حساب' },
+   331→    { key: 'account.create',     locale: 'en',    value: 'New Account' },
+   332→    { key: 'account.empty',      locale: 'ar-EG', value: 'لا توجد حسابات' },
+   333→    { key: 'account.empty',      locale: 'ar-SA', value: 'لا توجد حسابات' },
+   334→    { key: 'account.empty',      locale: 'en',    value: 'No accounts' },
+   335→
+   336→    // Account types
+   337→    { key: 'type.ASSET',         locale: 'ar-EG', value: 'أصول' },
+   338→    { key: 'type.ASSET',         locale: 'ar-SA', value: 'أصول' },
+   339→    { key: 'type.ASSET',         locale: 'en',    value: 'Asset' },
+   340→    { key: 'type.LIABILITY',     locale: 'ar-EG', value: 'خصوم' },
+   341→    { key: 'type.LIABILITY',     locale: 'ar-SA', value: 'التزامات' },
+   342→    { key: 'type.LIABILITY',     locale: 'en',    value: 'Liability' },
+   343→    { key: 'type.EQUITY',        locale: 'ar-EG', value: 'حقوق ملكية' },
+   344→    { key: 'type.EQUITY',        locale: 'ar-SA', value: 'حقوق ملكية' },
+   345→    { key: 'type.EQUITY',        locale: 'en',    value: 'Equity' },
+   346→    { key: 'type.REVENUE',       locale: 'ar-EG', value: 'إيرادات' },
+   347→    { key: 'type.REVENUE',       locale: 'ar-SA', value: 'إيرادات' },
+   348→    { key: 'type.REVENUE',       locale: 'en',    value: 'Revenue' },
+   349→    { key: 'type.EXPENSE',       locale: 'ar-EG', value: 'مصروفات' },
+   350→    { key: 'type.EXPENSE',       locale: 'ar-SA', value: 'مصروفات' },
+   351→    { key: 'type.EXPENSE',       locale: 'en',    value: 'Expense' },
+   352→
+   353→    // Journal
+   354→    { key: 'journal.date',       locale: 'ar-EG', value: 'التاريخ' },
+   355→    { key: 'journal.date',       locale: 'ar-SA', value: 'التاريخ' },
+   356→    { key: 'journal.date',       locale: 'en',    value: 'Date' },
+   357→    { key: 'journal.description',locale: 'ar-EG', value: 'البيان' },
+   358→    { key: 'journal.description',locale: 'ar-SA', value: 'البيان' },
+   359→    { key: 'journal.description',locale: 'en',    value: 'Description' },
+   360→    { key: 'journal.lines',      locale: 'ar-EG', value: 'البنود' },
+   361→    { key: 'journal.lines',      locale: 'ar-SA', value: 'البنود' },
+   362→    { key: 'journal.lines',      locale: 'en',    value: 'Lines' },
+   363→    { key: 'journal.debit',      locale: 'ar-EG', value: 'مدين' },
+   364→    { key: 'journal.debit',      locale: 'ar-SA', value: 'مدين' },
+   365→    { key: 'journal.debit',      locale: 'en',    value: 'Debit' },
+   366→    { key: 'journal.credit',     locale: 'ar-EG', value: 'دائن' },
+   367→    { key: 'journal.credit',     locale: 'ar-SA', value: 'دائن' },
+   368→    { key: 'journal.credit',     locale: 'en',    value: 'Credit' },
+   369→    { key: 'journal.create',     locale: 'ar-EG', value: 'قيد جديد' },
+   370→    { key: 'journal.create',     locale: 'ar-SA', value: 'قيد جديد' },
+   371→    { key: 'journal.create',     locale: 'en',    value: 'New Entry' },
+   372→    { key: 'journal.empty',      locale: 'ar-EG', value: 'لا توجد قيود' },
+   373→    { key: 'journal.empty',      locale: 'ar-SA', value: 'لا توجد قيود' },
+   374→    { key: 'journal.empty',      locale: 'en',    value: 'No journal entries' },
+   375→    { key: 'journal.unbalanced', locale: 'ar-EG', value: 'القيد غير متوازن: مجموع المدين يجب أن يساوي مجموع الدائن' },
+   376→    { key: 'journal.unbalanced', locale: 'ar-SA', value: 'القيد غير متوازن: مجموع المدين يجب أن يساوي مجموع الدائن' },
+   377→    { key: 'journal.unbalanced', locale: 'en',    value: 'Unbalanced entry: total debit must equal total credit' },
+   378→    { key: 'journal.created',    locale: 'ar-EG', value: 'تم إنشاء القيد بنجاح' },
+   379→    { key: 'journal.created',    locale: 'ar-SA', value: 'تم إنشاء القيد بنجاح' },
+   380→    { key: 'journal.created',    locale: 'en',    value: 'Journal entry created' },
+   381→    { key: 'journal.total',      locale: 'ar-EG', value: 'الإجمالي' },
+   382→    { key: 'journal.total',      locale: 'ar-SA', value: 'الإجمالي' },
+   383→    { key: 'journal.total',      locale: 'en',    value: 'Total' },
+   384→    { key: 'journal.addLine',    locale: 'ar-EG', value: 'إضافة بند' },
+   385→    { key: 'journal.addLine',    locale: 'ar-SA', value: 'إضافة بند' },
+   386→    { key: 'journal.addLine',    locale: 'en',    value: 'Add line' },
+   387→    { key: 'journal.save',       locale: 'ar-EG', value: 'حفظ القيد' },
+   388→    { key: 'journal.save',       locale: 'ar-SA', value: 'حفظ القيد' },
+   389→    { key: 'journal.save',       locale: 'en',    value: 'Save entry' },
+   390→    { key: 'journal.cancel',     locale: 'ar-EG', value: 'إلغاء' },
+   391→    { key: 'journal.cancel',     locale: 'ar-SA', value: 'إلغاء' },
+   392→    { key: 'journal.cancel',     locale: 'en',    value: 'Cancel' },
+   393→
+   394→    // Invoice (Phase 1)
+   395→    { key: 'nav.invoices',       locale: 'ar-EG', value: 'الفواتير' },
+   396→    { key: 'nav.invoices',       locale: 'ar-SA', value: 'الفواتير' },
+   397→    { key: 'nav.invoices',       locale: 'en',    value: 'Invoices' },
+   398→    { key: 'nav.reports',        locale: 'ar-EG', value: 'التقارير' },
+   399→    { key: 'nav.reports',        locale: 'ar-SA', value: 'التقارير' },
+   400→    { key: 'nav.reports',        locale: 'en',    value: 'Reports' },
+   401→    { key: 'invoice.title',      locale: 'ar-EG', value: 'الفواتير' },
+   402→    { key: 'invoice.title',      locale: 'ar-SA', value: 'الفواتير' },
+   403→    { key: 'invoice.title',      locale: 'en',    value: 'Invoices' },
+   404→    { key: 'invoice.number',     locale: 'ar-EG', value: 'رقم الفاتورة' },
+   405→    { key: 'invoice.number',     locale: 'ar-SA', value: 'رقم الفاتورة' },
+   406→    { key: 'invoice.number',     locale: 'en',    value: 'Invoice No.' },
+   407→    { key: 'invoice.customer',   locale: 'ar-EG', value: 'العميل' },
+   408→    { key: 'invoice.customer',   locale: 'ar-SA', value: 'العميل' },
+   409→    { key: 'invoice.customer',   locale: 'en',    value: 'Customer' },
+   410→    { key: 'invoice.date',       locale: 'ar-EG', value: 'التاريخ' },
+   411→    { key: 'invoice.date',       locale: 'ar-SA', value: 'التاريخ' },
+   412→    { key: 'invoice.date',       locale: 'en',    value: 'Date' },
+   413→    { key: 'invoice.status',     locale: 'ar-EG', value: 'الحالة' },
+   414→    { key: 'invoice.status',     locale: 'ar-SA', value: 'الحالة' },
+   415→    { key: 'invoice.status',     locale: 'en',    value: 'Status' },
+   416→    { key: 'invoice.total',      locale: 'ar-EG', value: 'الإجمالي' },
+   417→    { key: 'invoice.total',      locale: 'ar-SA', value: 'الإجمالي' },
+   418→    { key: 'invoice.total',      locale: 'en',    value: 'Total' },
+   419→    { key: 'invoice.create',     locale: 'ar-EG', value: 'فاتورة جديدة' },
+   420→    { key: 'invoice.create',     locale: 'ar-SA', value: 'فاتورة جديدة' },
+   421→    { key: 'invoice.create',     locale: 'en',    value: 'New Invoice' },
+   422→    { key: 'invoice.edit',       locale: 'ar-EG', value: 'تعديل' },
+   423→    { key: 'invoice.edit',       locale: 'ar-SA', value: 'تعديل' },
+   424→    { key: 'invoice.edit',       locale: 'en',    value: 'Edit' },
+   425→    { key: 'invoice.post',       locale: 'ar-EG', value: 'ترحيل' },
+   426→    { key: 'invoice.post',       locale: 'ar-SA', value: 'ترحيل' },
+   427→    { key: 'invoice.post',       locale: 'en',    value: 'Post' },
+   428→    { key: 'invoice.void',       locale: 'ar-EG', value: 'إلغاء الفاتورة' },
+   429→    { key: 'invoice.void',       locale: 'ar-SA', value: 'إلغاء الفاتورة' },
+   430→    { key: 'invoice.void',       locale: 'en',    value: 'Void' },
+   431→    { key: 'invoice.empty',      locale: 'ar-EG', value: 'لا توجد فواتير' },
+   432→    { key: 'invoice.empty',      locale: 'ar-SA', value: 'لا توجد فواتير' },
+   433→    { key: 'invoice.empty',      locale: 'en',    value: 'No invoices' },
+   434→    { key: 'invoice.lines',      locale: 'ar-EG', value: 'بنود الفاتورة' },
+   435→    { key: 'invoice.lines',      locale: 'ar-SA', value: 'بنود الفاتورة' },
+   436→    { key: 'invoice.lines',      locale: 'en',    value: 'Invoice Lines' },
+   437→    { key: 'invoice.description',locale: 'ar-EG', value: 'الوصف' },
+   438→    { key: 'invoice.description',locale: 'ar-SA', value: 'الوصف' },
+   439→    { key: 'invoice.description',locale: 'en',    value: 'Description' },
+   440→    { key: 'invoice.amount',     locale: 'ar-EG', value: 'المبلغ' },
+   441→    { key: 'invoice.amount',     locale: 'ar-SA', value: 'المبلغ' },
+   442→    { key: 'invoice.amount',     locale: 'en',    value: 'Amount' },
+   443→    { key: 'invoice.taxRate',    locale: 'ar-EG', value: 'نسبة الضريبة' },
+   444→    { key: 'invoice.taxRate',    locale: 'ar-SA', value: 'نسبة الضريبة' },
+   445→    { key: 'invoice.taxRate',    locale: 'en',    value: 'Tax Rate' },
+   446→    { key: 'invoice.addLine',    locale: 'ar-EG', value: 'إضافة بند' },
+   447→    { key: 'invoice.addLine',    locale: 'ar-SA', value: 'إضافة بند' },
+   448→    { key: 'invoice.addLine',    locale: 'en',    value: 'Add line' },
+   449→    { key: 'invoice.save',       locale: 'ar-EG', value: 'حفظ الفاتورة' },
+   450→    { key: 'invoice.save',       locale: 'ar-SA', value: 'حفظ الفاتورة' },
+   451→    { key: 'invoice.save',       locale: 'en',    value: 'Save invoice' },
+   452→    { key: 'invoice.cancel',     locale: 'ar-EG', value: 'إلغاء' },
+   453→    { key: 'invoice.cancel',     locale: 'ar-SA', value: 'إلغاء' },
+   454→    { key: 'invoice.cancel',     locale: 'en',    value: 'Cancel' },
+   455→    { key: 'invoice.posted',     locale: 'ar-EG', value: 'تم ترحيل الفاتورة بنجاح' },
+   456→    { key: 'invoice.posted',     locale: 'ar-SA', value: 'تم ترحيل الفاتورة بنجاح' },
+   457→    { key: 'invoice.posted',     locale: 'en',    value: 'Invoice posted to ledger' },
+   458→    { key: 'invoice.voided',     locale: 'ar-EG', value: 'تم إلغاء الفاتورة بقيد عكسي' },
+   459→    { key: 'invoice.voided',     locale: 'ar-SA', value: 'تم إلغاء الفاتورة بقيد عكسي' },
+   460→    { key: 'invoice.voided',     locale: 'en',    value: 'Invoice voided with reversing entry' },
+   461→    { key: 'invoice.created',    locale: 'ar-EG', value: 'تم إنشاء الفاتورة' },
+   462→    { key: 'invoice.created',    locale: 'ar-SA', value: 'تم إنشاء الفاتورة' },
+   463→    { key: 'invoice.created',    locale: 'en',    value: 'Invoice created' },
+   464→    { key: 'invoice.updated',    locale: 'ar-EG', value: 'تم تحديث الفاتورة' },
+   465→    { key: 'invoice.updated',    locale: 'ar-SA', value: 'تم تحديث الفاتورة' },
+   466→    { key: 'invoice.updated',    locale: 'en',    value: 'Invoice updated' },
+   467→    { key: 'invoice.cannotModify',locale: 'ar-EG', value: 'لا يمكن تعديل فاتورة مرحّلة أو ملغاة' },
+   468→    { key: 'invoice.cannotModify',locale: 'ar-SA', value: 'لا يمكن تعديل فاتورة مرحّلة أو ملغاة' },
+   469→    { key: 'invoice.cannotModify',locale: 'en',    value: 'Cannot modify a posted or voided invoice' },
+   470→    { key: 'invoice.notFound',   locale: 'ar-EG', value: 'الفاتورة غير موجودة' },
+   471→    { key: 'invoice.notFound',   locale: 'ar-SA', value: 'الفاتورة غير موجودة' },
+   472→    { key: 'invoice.notFound',   locale: 'en',    value: 'Invoice not found' },
+   473→    { key: 'invoice.configError',locale: 'ar-EG', value: 'خطأ في إعداد الحسابات المطلوبة للترحيل' },
+   474→    { key: 'invoice.configError',locale: 'ar-SA', value: 'خطأ في إعداد الحسابات المطلوبة للترحيل' },
+   475→    { key: 'invoice.configError',locale: 'en',    value: 'Posting accounts not configured' },
+   476→    { key: 'invoice.baseTotal',  locale: 'ar-EG', value: 'إجمالي قبل الضريبة' },
+   477→    { key: 'invoice.baseTotal',  locale: 'ar-SA', value: 'إجمالي قبل الضريبة' },
+   478→    { key: 'invoice.baseTotal',  locale: 'en',    value: 'Subtotal' },
+   479→    { key: 'invoice.taxTotal',   locale: 'ar-EG', value: 'إجمالي الضريبة' },
+   480→    { key: 'invoice.taxTotal',   locale: 'ar-SA', value: 'إجمالي الضريبة' },
+   481→    { key: 'invoice.taxTotal',   locale: 'en',    value: 'Tax Total' },
+   482→    { key: 'invoice.grandTotal', locale: 'ar-EG', value: 'الإجمالي الكلي' },
+   483→    { key: 'invoice.grandTotal', locale: 'ar-SA', value: 'الإجمالي الكلي' },
+   484→    { key: 'invoice.grandTotal', locale: 'en',    value: 'Grand Total' },
+   485→
+   486→    // Invoice status labels
+   487→    { key: 'invoice.status.DRAFT',  locale: 'ar-EG', value: 'مسودة' },
+   488→    { key: 'invoice.status.DRAFT',  locale: 'ar-SA', value: 'مسودة' },
+   489→    { key: 'invoice.status.DRAFT',  locale: 'en',    value: 'Draft' },
+   490→    { key: 'invoice.status.POSTED', locale: 'ar-EG', value: 'مرحّلة' },
+   491→    { key: 'invoice.status.POSTED', locale: 'ar-SA', value: 'مرحّلة' },
+   492→    { key: 'invoice.status.POSTED', locale: 'en',    value: 'Posted' },
+   493→    { key: 'invoice.status.VOID',   locale: 'ar-EG', value: 'ملغاة' },
+   494→    { key: 'invoice.status.VOID',   locale: 'ar-SA', value: 'ملغاة' },
+   495→    { key: 'invoice.status.VOID',   locale: 'en',    value: 'Void' },
+   496→
+   497→    // Account names (Phase 1 additions)
+   498→    { key: 'account.receivable', locale: 'ar-EG', value: 'العملاء (ذمم مدينة)' },
+   499→    { key: 'account.receivable', locale: 'ar-SA', value: 'العملاء (ذمم مدينة)' },
+   500→    { key: 'account.receivable', locale: 'en',    value: 'Accounts Receivable' },
+   501→    { key: 'account.salesTax',   locale: 'ar-EG', value: 'ضريبة القيمة المضافة المستحقة' },
+   502→    { key: 'account.salesTax',   locale: 'ar-SA', value: 'ضريبة القيمة المضافة المستحقة' },
+   503→    { key: 'account.salesTax',   locale: 'en',    value: 'Sales Tax Payable' },
+   504→
+   505→    // Income statement report
+   506→    { key: 'report.incomeStatement',     locale: 'ar-EG', value: 'قائمة الدخل' },
+   507→    { key: 'report.incomeStatement',     locale: 'ar-SA', value: 'قائمة الدخل' },
+   508→    { key: 'report.incomeStatement',     locale: 'en',    value: 'Income Statement' },
+   509→    { key: 'report.revenue',             locale: 'ar-EG', value: 'الإيرادات' },
+   510→    { key: 'report.revenue',             locale: 'ar-SA', value: 'الإيرادات' },
+   511→    { key: 'report.revenue',             locale: 'en',    value: 'Revenue' },
+   512→    { key: 'report.expenses',            locale: 'ar-EG', value: 'المصروفات' },
+   513→    { key: 'report.expenses',            locale: 'ar-SA', value: 'المصروفات' },
+   514→    { key: 'report.expenses',            locale: 'en',    value: 'Expenses' },
+   515→    { key: 'report.netIncome',           locale: 'ar-EG', value: 'صافي الدخل' },
+   516→    { key: 'report.netIncome',           locale: 'ar-SA', value: 'صافي الدخل' },
+   517→    { key: 'report.netIncome',           locale: 'en',    value: 'Net Income' },
+   518→    { key: 'report.totalRevenue',        locale: 'ar-EG', value: 'إجمالي الإيرادات' },
+   519→    { key: 'report.totalRevenue',        locale: 'ar-SA', value: 'إجمالي الإيرادات' },
+   520→    { key: 'report.totalRevenue',        locale: 'en',    value: 'Total Revenue' },
+   521→    { key: 'report.totalExpenses',       locale: 'ar-EG', value: 'إجمالي المصروفات' },
+   522→    { key: 'report.totalExpenses',       locale: 'ar-SA', value: 'إجمالي المصروفات' },
+   523→    { key: 'report.totalExpenses',       locale: 'en',    value: 'Total Expenses' },
+   524→    { key: 'report.account',             locale: 'ar-EG', value: 'الحساب' },
+   525→    { key: 'report.account',             locale: 'ar-SA', value: 'الحساب' },
+   526→    { key: 'report.account',             locale: 'en',    value: 'Account' },
+   527→    { key: 'report.balance',             locale: 'ar-EG', value: 'الرصيد' },
+   528→    { key: 'report.balance',             locale: 'ar-SA', value: 'الرصيد' },
+   529→    { key: 'report.balance',             locale: 'en',    value: 'Balance' },
+   530→    { key: 'report.noData',              locale: 'ar-EG', value: 'لا توجد بيانات مالية' },
+   531→    { key: 'report.noData',              locale: 'ar-SA', value: 'لا توجد بيانات مالية' },
+   532→    { key: 'report.noData',              locale: 'en',    value: 'No financial data' },
+   533→
+   534→    // Inventory (Phase 2)
+   535→    { key: 'nav.inventory',      locale: 'ar-EG', value: 'المخزون' },
+   536→    { key: 'nav.inventory',      locale: 'ar-SA', value: 'المخزون' },
+   537→    { key: 'nav.inventory',      locale: 'en',    value: 'Inventory' },
+   538→    { key: 'nav.purchases',      locale: 'ar-EG', value: 'المشتريات' },
+   539→    { key: 'nav.purchases',      locale: 'ar-SA', value: 'المشتريات' },
+   540→    { key: 'nav.purchases',      locale: 'en',    value: 'Purchases' },
+   541→    { key: 'inventory.title',    locale: 'ar-EG', value: 'المخزون' },
+   542→    { key: 'inventory.title',    locale: 'ar-SA', value: 'المخزون' },
+   543→    { key: 'inventory.title',    locale: 'en',    value: 'Inventory' },
+   544→    { key: 'inventory.products', locale: 'ar-EG', value: 'المنتجات' },
+   545→    { key: 'inventory.products', locale: 'ar-SA', value: 'المنتجات' },
+   546→    { key: 'inventory.products', locale: 'en',    value: 'Products' },
+   547→    { key: 'inventory.warehouses',locale: 'ar-EG', value: 'المخازن' },
+   548→    { key: 'inventory.warehouses',locale: 'ar-SA', value: 'المخازن' },
+   549→    { key: 'inventory.warehouses',locale: 'en',    value: 'Warehouses' },
+   550→    { key: 'inventory.sku',      locale: 'ar-EG', value: 'رمز المنتج' },
+   551→    { key: 'inventory.sku',      locale: 'ar-SA', value: 'رمز المنتج' },
+   552→    { key: 'inventory.sku',      locale: 'en',    value: 'SKU' },
+   553→    { key: 'inventory.name',     locale: 'ar-EG', value: 'الاسم' },
+   554→    { key: 'inventory.name',     locale: 'ar-SA', value: 'الاسم' },
+   555→    { key: 'inventory.name',     locale: 'en',    value: 'Name' },
+   556→    { key: 'inventory.costPrice',locale: 'ar-EG', value: 'تكلفة الوحدة' },
+   557→    { key: 'inventory.costPrice',locale: 'ar-SA', value: 'تكلفة الوحدة' },
+   558→    { key: 'inventory.costPrice',locale: 'en',    value: 'Cost Price' },
+   559→    { key: 'inventory.sellPrice',locale: 'ar-EG', value: 'سعر البيع' },
+   560→    { key: 'inventory.sellPrice',locale: 'ar-SA', value: 'سعر البيع' },
+   561→    { key: 'inventory.sellPrice',locale: 'en',    value: 'Sell Price' },
+   562→    { key: 'inventory.stock',    locale: 'ar-EG', value: 'الكمية' },
+   563→    { key: 'inventory.stock',    locale: 'ar-SA', value: 'الكمية' },
+   564→    { key: 'inventory.stock',    locale: 'en',    value: 'Stock' },
+   565→    { key: 'inventory.createProduct',locale: 'ar-EG', value: 'منتج جديد' },
+   566→    { key: 'inventory.createProduct',locale: 'ar-SA', value: 'منتج جديد' },
+   567→    { key: 'inventory.createProduct',locale: 'en',    value: 'New Product' },
+   568→    { key: 'inventory.createWarehouse',locale: 'ar-EG', value: 'مخزن جديد' },
+   569→    { key: 'inventory.createWarehouse',locale: 'ar-SA', value: 'مخزن جديد' },
+   570→    { key: 'inventory.createWarehouse',locale: 'en',    value: 'New Warehouse' },
+   571→    { key: 'inventory.empty',    locale: 'ar-EG', value: 'لا توجد بيانات' },
+   572→    { key: 'inventory.empty',    locale: 'ar-SA', value: 'لا توجد بيانات' },
+   573→    { key: 'inventory.empty',    locale: 'en',    value: 'No data' },
+   574→    { key: 'inventory.insufficientStock',locale: 'ar-EG', value: 'الكمية المتاحة غير كافية' },
+   575→    { key: 'inventory.insufficientStock',locale: 'ar-SA', value: 'الكمية المتاحة غير كافية' },
+   576→    { key: 'inventory.insufficientStock',locale: 'en',    value: 'Insufficient stock' },
+   577→    { key: 'inventory.configError',locale: 'ar-EG', value: 'خطأ في إعداد حسابات المخزون' },
+   578→    { key: 'inventory.configError',locale: 'ar-SA', value: 'خطأ في إعداد حسابات المخزون' },
+   579→    { key: 'inventory.configError',locale: 'en',    value: 'Inventory accounts not configured' },
+   580→    { key: 'inventory.default',  locale: 'ar-EG', value: 'افتراضي' },
+   581→    { key: 'inventory.default',  locale: 'ar-SA', value: 'افتراضي' },
+   582→    { key: 'inventory.default',  locale: 'en',    value: 'Default' },
+   583→
+   584→    // Purchase orders (Phase 2)
+   585→    { key: 'purchaseOrder.title',     locale: 'ar-EG', value: 'أوامر الشراء' },
+   586→    { key: 'purchaseOrder.title',     locale: 'ar-SA', value: 'أوامر الشراء' },
+   587→    { key: 'purchaseOrder.title',     locale: 'en',    value: 'Purchase Orders' },
+   588→    { key: 'purchaseOrder.number',    locale: 'ar-EG', value: 'رقم الأمر' },
+   589→    { key: 'purchaseOrder.number',    locale: 'ar-SA', value: 'رقم الأمر' },
+   590→    { key: 'purchaseOrder.number',    locale: 'en',    value: 'PO No.' },
+   591→    { key: 'purchaseOrder.supplier',  locale: 'ar-EG', value: 'المورد' },
+   592→    { key: 'purchaseOrder.supplier',  locale: 'ar-SA', value: 'المورد' },
+   593→    { key: 'purchaseOrder.supplier',  locale: 'en',    value: 'Supplier' },
+   594→    { key: 'purchaseOrder.date',      locale: 'ar-EG', value: 'التاريخ' },
+   595→    { key: 'purchaseOrder.date',      locale: 'ar-SA', value: 'التاريخ' },
+   596→    { key: 'purchaseOrder.date',      locale: 'en',    value: 'Date' },
+   597→    { key: 'purchaseOrder.status',    locale: 'ar-EG', value: 'الحالة' },
+   598→    { key: 'purchaseOrder.status',    locale: 'ar-SA', value: 'الحالة' },
+   599→    { key: 'purchaseOrder.status',    locale: 'en',    value: 'Status' },
+   600→    { key: 'purchaseOrder.total',     locale: 'ar-EG', value: 'الإجمالي' },
+   601→    { key: 'purchaseOrder.total',     locale: 'ar-SA', value: 'الإجمالي' },
+   602→    { key: 'purchaseOrder.total',     locale: 'en',    value: 'Total' },
+   603→    { key: 'purchaseOrder.create',    locale: 'ar-EG', value: 'أمر شراء جديد' },
+   604→    { key: 'purchaseOrder.create',    locale: 'ar-SA', value: 'أمر شراء جديد' },
+   605→    { key: 'purchaseOrder.create',    locale: 'en',    value: 'New Purchase Order' },
+   606→    { key: 'purchaseOrder.receive',   locale: 'ar-EG', value: 'استلام' },
+   607→    { key: 'purchaseOrder.receive',   locale: 'ar-SA', value: 'استلام' },
+   608→    { key: 'purchaseOrder.receive',   locale: 'en',    value: 'Receive' },
+   609→    { key: 'purchaseOrder.received',  locale: 'ar-EG', value: 'تم استلام الأمر بنجاح' },
+   610→    { key: 'purchaseOrder.received',  locale: 'ar-SA', value: 'تم استلام الأمر بنجاح' },
+   611→    { key: 'purchaseOrder.received',  locale: 'en',    value: 'Purchase order received' },
+   612→    { key: 'purchaseOrder.empty',     locale: 'ar-EG', value: 'لا توجد أوامر شراء' },
+   613→    { key: 'purchaseOrder.empty',     locale: 'ar-SA', value: 'لا توجد أوامر شراء' },
+   614→    { key: 'purchaseOrder.empty',     locale: 'en',    value: 'No purchase orders' },
+   615→    { key: 'purchaseOrder.lines',     locale: 'ar-EG', value: 'بنود الأمر' },
+   616→    { key: 'purchaseOrder.lines',     locale: 'ar-SA', value: 'بنود الأمر' },
+   617→    { key: 'purchaseOrder.lines',     locale: 'en',    value: 'Order Lines' },
+   618→    { key: 'purchaseOrder.product',   locale: 'ar-EG', value: 'المنتج' },
+   619→    { key: 'purchaseOrder.product',   locale: 'ar-SA', value: 'المنتج' },
+   620→    { key: 'purchaseOrder.product',   locale: 'en',    value: 'Product' },
+   621→    { key: 'purchaseOrder.warehouse', locale: 'ar-EG', value: 'المخزن' },
+   622→    { key: 'purchaseOrder.warehouse', locale: 'ar-SA', value: 'المخزن' },
+   623→    { key: 'purchaseOrder.warehouse', locale: 'en',    value: 'Warehouse' },
+   624→    { key: 'purchaseOrder.quantity',  locale: 'ar-EG', value: 'الكمية' },
+   625→    { key: 'purchaseOrder.quantity',  locale: 'ar-SA', value: 'الكمية' },
+   626→    { key: 'purchaseOrder.quantity',  locale: 'en',    value: 'Quantity' },
+   627→    { key: 'purchaseOrder.unitCost',  locale: 'ar-EG', value: 'تكلفة الوحدة' },
+   628→    { key: 'purchaseOrder.unitCost',  locale: 'ar-SA', value: 'تكلفة الوحدة' },
+   629→    { key: 'purchaseOrder.unitCost',  locale: 'en',    value: 'Unit Cost' },
+   630→    { key: 'purchaseOrder.addLine',   locale: 'ar-EG', value: 'إضافة بند' },
+   631→    { key: 'purchaseOrder.addLine',   locale: 'ar-SA', value: 'إضافة بند' },
+   632→    { key: 'purchaseOrder.addLine',   locale: 'en',    value: 'Add line' },
+   633→    { key: 'purchaseOrder.save',      locale: 'ar-EG', value: 'حفظ الأمر' },
+   634→    { key: 'purchaseOrder.save',      locale: 'ar-SA', value: 'حفظ الأمر' },
+   635→    { key: 'purchaseOrder.save',      locale: 'en',    value: 'Save order' },
+   636→    { key: 'purchaseOrder.cancel',    locale: 'ar-EG', value: 'إلغاء' },
+   637→    { key: 'purchaseOrder.cancel',    locale: 'ar-SA', value: 'إلغاء' },
+   638→    { key: 'purchaseOrder.cancel',    locale: 'en',    value: 'Cancel' },
+   639→    { key: 'purchaseOrder.notFound',  locale: 'ar-EG', value: 'أمر الشراء غير موجود' },
+   640→    { key: 'purchaseOrder.notFound',  locale: 'ar-SA', value: 'أمر الشراء غير موجود' },
+   641→    { key: 'purchaseOrder.notFound',  locale: 'en',    value: 'Purchase order not found' },
+   642→    { key: 'purchaseOrder.cannotModify',locale: 'ar-EG', value: 'لا يمكن تعديل أمر شراء مستلم' },
+   643→    { key: 'purchaseOrder.cannotModify',locale: 'ar-SA', value: 'لا يمكن تعديل أمر شراء مستلم' },
+   644→    { key: 'purchaseOrder.cannotModify',locale: 'en',    value: 'Cannot modify a received purchase order' },
+   645→    { key: 'purchaseOrder.status.DRAFT',    locale: 'ar-EG', value: 'مسودة' },
+   646→    { key: 'purchaseOrder.status.DRAFT',    locale: 'ar-SA', value: 'مسودة' },
+   647→    { key: 'purchaseOrder.status.DRAFT',    locale: 'en',    value: 'Draft' },
+   648→    { key: 'purchaseOrder.status.RECEIVED', locale: 'ar-EG', value: 'مستلم' },
+   649→    { key: 'purchaseOrder.status.RECEIVED', locale: 'ar-SA', value: 'مستلم' },
+   650→    { key: 'purchaseOrder.status.RECEIVED', locale: 'en',    value: 'Received' },
+   651→    { key: 'purchaseOrder.status.CANCELLED',locale: 'ar-EG', value: 'ملغي' },
+   652→    { key: 'purchaseOrder.status.CANCELLED',locale: 'ar-SA', value: 'ملغي' },
+   653→    { key: 'purchaseOrder.status.CANCELLED',locale: 'en',    value: 'Cancelled' },
+   654→
+   655→    // Account names (Phase 2 additions)
+   656→    { key: 'account.inventory',   locale: 'ar-EG', value: 'المخزون' },
+   657→    { key: 'account.inventory',   locale: 'ar-SA', value: 'المخزون' },
+   658→    { key: 'account.inventory',   locale: 'en',    value: 'Inventory' },
+   659→    { key: 'account.payable',     locale: 'ar-EG', value: 'حسابات دائنة (موردون)' },
+   660→    { key: 'account.payable',     locale: 'ar-SA', value: 'حسابات دائنة (موردون)' },
+   661→    { key: 'account.payable',     locale: 'en',    value: 'Accounts Payable' },
+   662→    { key: 'account.cogs',        locale: 'ar-EG', value: 'تكلفة البضاعة المباعة' },
+   663→    { key: 'account.cogs',        locale: 'ar-SA', value: 'تكلفة البضاعة المباعة' },
+   664→    { key: 'account.cogs',        locale: 'en',    value: 'Cost of Goods Sold' },
+   665→
+   666→    // Product names
+   667→    { key: 'product.laptop',      locale: 'ar-EG', value: 'لابتوب' },
+   668→    { key: 'product.laptop',      locale: 'ar-SA', value: 'لابتوب' },
+   669→    { key: 'product.laptop',      locale: 'en',    value: 'Laptop' },
+   670→    { key: 'product.mouse',       locale: 'ar-EG', value: 'ماوس' },
+   671→    { key: 'product.mouse',       locale: 'ar-SA', value: 'ماوس' },
+   672→    { key: 'product.mouse',       locale: 'en',    value: 'Mouse' },
+   673→    { key: 'product.keyboard',    locale: 'ar-EG', value: 'لوحة مفاتيح' },
+   674→    { key: 'product.keyboard',    locale: 'ar-SA', value: 'لوحة مفاتيح' },
+   675→    { key: 'product.keyboard',    locale: 'en',    value: 'Keyboard' },
+   676→
+   677→    // Warehouse names
+   678→    { key: 'warehouse.main',      locale: 'ar-EG', value: 'المخزن الرئيسي' },
+   679→    { key: 'warehouse.main',      locale: 'ar-SA', value: 'المخزن الرئيسي' },
+   680→    { key: 'warehouse.main',      locale: 'en',    value: 'Main Warehouse' },
+   681→
+   682→    // POS (Phase 3)
+   683→    { key: 'nav.pos',             locale: 'ar-EG', value: 'نقطة البيع' },
+   684→    { key: 'nav.pos',             locale: 'ar-SA', value: 'نقطة البيع' },
+   685→    { key: 'nav.pos',             locale: 'en',    value: 'POS' },
+   686→    { key: 'pos.title',           locale: 'ar-EG', value: 'نقطة البيع' },
+   687→    { key: 'pos.title',           locale: 'ar-SA', value: 'نقطة البيع' },
+   688→    { key: 'pos.title',           locale: 'en',    value: 'Point of Sale' },
+   689→    { key: 'pos.searchProducts',  locale: 'ar-EG', value: 'ابحث عن منتج بالاسم أو الرمز' },
+   690→    { key: 'pos.searchProducts',  locale: 'ar-SA', value: 'ابحث عن منتج بالاسم أو الرمز' },
+   691→    { key: 'pos.searchProducts',  locale: 'en',    value: 'Search products by name or SKU' },
+   692→    { key: 'pos.cart',            locale: 'ar-EG', value: 'السلة' },
+   693→    { key: 'pos.cart',            locale: 'ar-SA', value: 'السلة' },
+   694→    { key: 'pos.cart',            locale: 'en',    value: 'Cart' },
+   695→    { key: 'pos.checkout',        locale: 'ar-EG', value: 'إتمام البيع' },
+   696→    { key: 'pos.checkout',        locale: 'ar-SA', value: 'إتمام البيع' },
+   697→    { key: 'pos.checkout',        locale: 'en',    value: 'Checkout' },
+   698→    { key: 'pos.customerName',    locale: 'ar-EG', value: 'اسم العميل' },
+   699→    { key: 'pos.customerName',    locale: 'ar-SA', value: 'اسم العميل' },
+   700→    { key: 'pos.customerName',    locale: 'en',    value: 'Customer Name' },
+   701→    { key: 'pos.warehouse',       locale: 'ar-EG', value: 'المخزن' },
+   702→    { key: 'pos.warehouse',       locale: 'ar-SA', value: 'المخزن' },
+   703→    { key: 'pos.warehouse',       locale: 'en',    value: 'Warehouse' },
+   704→    { key: 'pos.emptyCart',       locale: 'ar-EG', value: 'السلة فارغة' },
+   705→    { key: 'pos.emptyCart',       locale: 'ar-SA', value: 'السلة فارغة' },
+   706→    { key: 'pos.emptyCart',       locale: 'en',    value: 'Cart is empty' },
+   707→    { key: 'pos.subtotal',        locale: 'ar-EG', value: 'الإجمالي قبل الضريبة' },
+   708→    { key: 'pos.subtotal',        locale: 'ar-SA', value: 'الإجمالي قبل الضريبة' },
+   709→    { key: 'pos.subtotal',        locale: 'en',    value: 'Subtotal' },
+   710→    { key: 'pos.tax',             locale: 'ar-EG', value: 'الضريبة' },
+   711→    { key: 'pos.tax',             locale: 'ar-SA', value: 'الضريبة' },
+   712→    { key: 'pos.tax',             locale: 'en',    value: 'Tax' },
+   713→    { key: 'pos.total',           locale: 'ar-EG', value: 'الإجمالي' },
+   714→    { key: 'pos.total',           locale: 'ar-SA', value: 'الإجمالي' },
+   715→    { key: 'pos.total',           locale: 'en',    value: 'Total' },
+   716→    { key: 'pos.saleComplete',    locale: 'ar-EG', value: 'تم إتمام البيع بنجاح' },
+   717→    { key: 'pos.saleComplete',    locale: 'ar-SA', value: 'تم إتمام البيع بنجاح' },
+   718→    { key: 'pos.saleComplete',    locale: 'en',    value: 'Sale completed successfully' },
+   719→    { key: 'pos.receipt',         locale: 'ar-EG', value: 'إيصال' },
+   720→    { key: 'pos.receipt',         locale: 'ar-SA', value: 'إيصال' },
+   721→    { key: 'pos.receipt',         locale: 'en',    value: 'Receipt' },
+   722→    { key: 'pos.invoiceNumber',   locale: 'ar-EG', value: 'رقم الفاتورة' },
+   723→    { key: 'pos.invoiceNumber',   locale: 'ar-SA', value: 'رقم الفاتورة' },
+   724→    { key: 'pos.invoiceNumber',   locale: 'en',    value: 'Invoice No.' },
+   725→    { key: 'pos.cogs',            locale: 'ar-EG', value: 'تكلفة البضاعة المباعة' },
+   726→    { key: 'pos.cogs',            locale: 'ar-SA', value: 'تكلفة البضاعة المباعة' },
+   727→    { key: 'pos.cogs',            locale: 'en',    value: 'COGS' },
+   728→    { key: 'pos.netProfit',       locale: 'ar-EG', value: 'صافي الربح' },
+   729→    { key: 'pos.netProfit',       locale: 'ar-SA', value: 'صافي الربح' },
+   730→    { key: 'pos.netProfit',       locale: 'en',    value: 'Net Profit' },
+   731→    { key: 'pos.newSale',         locale: 'ar-EG', value: 'بيع جديد' },
+   732→    { key: 'pos.newSale',         locale: 'ar-SA', value: 'بيع جديد' },
+   733→    { key: 'pos.newSale',         locale: 'en',    value: 'New Sale' },
+   734→    { key: 'pos.noProducts',      locale: 'ar-EG', value: 'لا توجد منتجات' },
+   735→    { key: 'pos.noProducts',      locale: 'ar-SA', value: 'لا توجد منتجات' },
+   736→    { key: 'pos.noProducts',      locale: 'en',    value: 'No products' },
+   737→    { key: 'pos.addToCart',       locale: 'ar-EG', value: 'إضافة للسلة' },
+   738→    { key: 'pos.addToCart',       locale: 'ar-SA', value: 'إضافة للسلة' },
+   739→    { key: 'pos.addToCart',       locale: 'en',    value: 'Add to cart' },
+   740→    { key: 'pos.qty',             locale: 'ar-EG', value: 'الكمية' },
+   741→    { key: 'pos.qty',             locale: 'ar-SA', value: 'الكمية' },
+   742→    { key: 'pos.qty',             locale: 'en',    value: 'Qty' },
+   743→    { key: 'pos.price',           locale: 'ar-EG', value: 'السعر' },
+   744→    { key: 'pos.price',           locale: 'ar-SA', value: 'السعر' },
+   745→    { key: 'pos.price',           locale: 'en',    value: 'Price' },
+   746→    { key: 'pos.stock',           locale: 'ar-EG', value: 'المتاح' },
+   747→    { key: 'pos.stock',           locale: 'ar-SA', value: 'المتاح' },
+   748→    { key: 'pos.stock',           locale: 'en',    value: 'Stock' },
+   749→
+   750→    // Invoice channel labels
+   751→    { key: 'invoice.channel.MANUAL', locale: 'ar-EG', value: 'يدوية' },
+   752→    { key: 'invoice.channel.MANUAL', locale: 'ar-SA', value: 'يدوية' },
+   753→    { key: 'invoice.channel.MANUAL', locale: 'en',    value: 'Manual' },
+   754→    { key: 'invoice.channel.POS',    locale: 'ar-EG', value: 'نقطة بيع' },
+   755→    { key: 'invoice.channel.POS',    locale: 'ar-SA', value: 'نقطة بيع' },
+   756→    { key: 'invoice.channel.POS',    locale: 'en',    value: 'POS' },
+   757→
+   758→    // Tests
+   759→    { key: 'tests.title',        locale: 'ar-EG', value: 'اختبارات العزل والتوازن' },
+   760→    { key: 'tests.title',        locale: 'ar-SA', value: 'اختبارات العزل والتوازن' },
+   761→    { key: 'tests.title',        locale: 'en',    value: 'Isolation & Balance Tests' },
+   762→    { key: 'tests.run',          locale: 'ar-EG', value: 'تشغيل الاختبارات' },
+   763→    { key: 'tests.run',          locale: 'ar-SA', value: 'تشغيل الاختبارات' },
+   764→    { key: 'tests.run',          locale: 'en',    value: 'Run tests' },
+   765→    { key: 'tests.tenantIsolation', locale: 'ar-EG', value: 'عزل المستأجرين' },
+   766→    { key: 'tests.tenantIsolation', locale: 'ar-SA', value: 'عزل المستأجرين' },
+   767→    { key: 'tests.tenantIsolation', locale: 'en',    value: 'Tenant isolation' },
+   768→    { key: 'tests.journalBalance',  locale: 'ar-EG', value: 'توازن القيود' },
+   769→    { key: 'tests.journalBalance',  locale: 'ar-SA', value: 'توازن القيود' },
+   770→    { key: 'tests.journalBalance',  locale: 'en',    value: 'Journal balance' },
+   771→    { key: 'tests.passed',       locale: 'ar-EG', value: 'نجح' },
+   772→    { key: 'tests.passed',       locale: 'ar-SA', value: 'نجح' },
+   773→    { key: 'tests.passed',       locale: 'en',    value: 'PASS' },
+   774→    { key: 'tests.failed',       locale: 'ar-EG', value: 'فشل' },
+   775→    { key: 'tests.failed',       locale: 'ar-SA', value: 'فشل' },
+   776→    { key: 'tests.failed',       locale: 'en',    value: 'FAIL' },
+   777→    { key: 'tests.running',      locale: 'ar-EG', value: 'جارٍ التشغيل...' },
+   778→    { key: 'tests.running',      locale: 'ar-SA', value: 'جارٍ التشغيل...' },
+   779→    { key: 'tests.running',      locale: 'en',    value: 'Running...' },
+   780→    { key: 'tests.idle',         locale: 'ar-EG', value: 'لم يتم التشغيل بعد' },
+   781→    { key: 'tests.idle',         locale: 'ar-SA', value: 'لم يتم التشغيل بعد' },
+   782→    { key: 'tests.idle',         locale: 'en',    value: 'Not run yet' },
+   783→
+   784→    // Common
+   785→    { key: 'common.welcome',     locale: 'ar-EG', value: 'أهلاً' },
+   786→    { key: 'common.welcome',     locale: 'ar-SA', value: 'مرحباً' },
+   787→    { key: 'common.welcome',     locale: 'en',    value: 'Welcome' },
+   788→    { key: 'common.role',        locale: 'ar-EG', value: 'الدور' },
+   789→    { key: 'common.role',        locale: 'ar-SA', value: 'الدور' },
+   790→    { key: 'common.role',        locale: 'en',    value: 'Role' },
+   791→    { key: 'common.tenant',      locale: 'ar-EG', value: 'المستأجر' },
+   792→    { key: 'common.tenant',      locale: 'ar-SA', value: 'المستأجر' },
+   793→    { key: 'common.tenant',      locale: 'en',    value: 'Tenant' },
+   794→    { key: 'common.language',    locale: 'ar-EG', value: 'اللغة' },
+   795→    { key: 'common.language',    locale: 'ar-SA', value: 'اللغة' },
+   796→    { key: 'common.language',    locale: 'en',    value: 'Language' },
+   797→    { key: 'common.loading',     locale: 'ar-EG', value: 'جارٍ التحميل...' },
+   798→    { key: 'common.loading',     locale: 'ar-SA', value: 'جارٍ التحميل...' },
+   799→    { key: 'common.loading',     locale: 'en',    value: 'Loading...' },
+   800→    { key: 'common.error',       locale: 'ar-EG', value: 'حدث خطأ' },
+   801→    { key: 'common.error',       locale: 'ar-SA', value: 'حدث خطأ' },
+   802→    { key: 'common.error',       locale: 'en',    value: 'Something went wrong' },
+   803→    { key: 'common.forbidden',   locale: 'ar-EG', value: 'ليس لديك صلاحية لتنفيذ هذا الإجراء' },
+   804→    { key: 'common.forbidden',   locale: 'ar-SA', value: 'ليس لديك صلاحية لتنفيذ هذا الإجراء' },
+   805→    { key: 'common.forbidden',   locale: 'en',    value: 'You do not have permission to perform this action' },
+   806→    { key: 'common.unauthorized',locale: 'ar-EG', value: 'يجب تسجيل الدخول أولاً' },
+   807→    { key: 'common.unauthorized',locale: 'ar-SA', value: 'يجب تسجيل الدخول أولاً' },
+   808→    { key: 'common.unauthorized',locale: 'en',    value: 'Authentication required' },
+   809→    { key: 'common.save',        locale: 'ar-EG', value: 'حفظ' },
+   810→    { key: 'common.save',        locale: 'ar-SA', value: 'حفظ' },
+   811→    { key: 'common.save',        locale: 'en',    value: 'Save' },
+   812→    { key: 'common.cancel',      locale: 'ar-EG', value: 'إلغاء' },
+   813→    { key: 'common.cancel',      locale: 'ar-SA', value: 'إلغاء' },
+   814→    { key: 'common.cancel',      locale: 'en',    value: 'Cancel' },
+   815→  ]
+   816→
+   817→  for (const t of translations) {
+   818→    await prisma.translation.upsert({
+   819→      where: { key_locale: { key: t.key, locale: t.locale } },
+   820→      update: { value: t.value },
+   821→      create: t,
+   822→    })
+   823→  }
+   824→
+   825→  console.log('✓ Seed complete.')
+   826→  console.log('  Tenants:', tenants.map((t) => `${t.id} (${t.name})`).join(', '))
+   827→  console.log('  Roles:', Object.keys(roles).join(', '))
+   828→  console.log('  Demo password for all users: password123')
+   829→}
+   830→
+   831→main()
+   832→  .catch((e) => {
+   833→    console.error(e)
+   834→    process.exit(1)
+   835→  })
+   836→  .finally(async () => {
+   837→    await prisma.$disconnect()
+   838→  })
+   839→

@@ -29,6 +29,10 @@ interface SessionUser {
   locale: string
   roleKeys: string[]
   permissionKeys: string[]
+  // Phase 8 — true when the user's email is in PLATFORM_ADMINS. The
+  // dashboard uses this to show the billing panel nav item. The actual
+  // /api/admin/* routes re-check server-side; this flag is UI-only.
+  isPlatformAdmin?: boolean
 }
 
 type State = 'loading' | 'unauth' | 'auth'

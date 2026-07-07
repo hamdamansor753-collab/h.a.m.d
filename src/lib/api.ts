@@ -10,6 +10,7 @@ import { NextResponse } from 'next/server'
 import { ZodError } from 'zod'
 import { RbacError } from '@/core/rbac'
 import { TenantContextError } from '@/core/tenancy/context'
+import { SubscriptionSuspendedError } from '@/modules/billing/subscription.service'
 import { t } from '@/core/i18n'
 
 export type ApiLocale = string
@@ -60,6 +61,30 @@ export function conflict(locale: ApiLocale, messageKey: string) {
   return NextResponse.json<ApiErrorBody>(
     { error: { code: 'CONFLICT', message: t(messageKey, locale) } },
     { status: 409 }
+  )
+}
+
+/**
+ * Phase 8 — 402 Payment Required. Returned when a tenant's subscription is
+ * SUSPENDED (and the request is a write) or CANCELLED (any method). The
+ * message is translated via `billing.subscriptionSuspended`.
+ */
+export function subscriptionSuspended(locale: ApiLocale) {
+  return NextResponse.json<ApiErrorBody>(
+    { error: { code: 'SUBSCRIPTION_SUSPENDED', message: t('billing.subscriptionSuspended', locale) } },
+    { status: 402 }
+  )
+}
+
+/**
+ * Phase 8 — 403 Forbidden for platform:admin routes. Returned when a
+ * non-platform-admin attempts to access /api/admin/*. Distinct from the
+ * RBAC 403 (`forbidden()`) so the client can surface the right message.
+ */
+export function platformAdminRequired(locale: ApiLocale) {
+  return NextResponse.json<ApiErrorBody>(
+    { error: { code: 'PLATFORM_ADMIN_REQUIRED', message: t('billing.accessDenied', locale) } },
+    { status: 403 }
   )
 }
 
@@ -141,6 +166,31 @@ export class InsufficientStockError extends Error {
 }
 
 /**
+ * Thrown by the payroll service when an operation is attempted on a
+ * payroll run in the wrong state (e.g. posting a non-DRAFT run) or with
+ * invalid input (bad period format, duplicate period, no employees).
+ */
+export class PayrollStateError extends Error {
+  constructor(
+    public code: 'NOT_DRAFT' | 'INVALID_PERIOD' | 'DUPLICATE_PERIOD' | 'NO_EMPLOYEES',
+    message: string
+  ) {
+    super(message)
+    this.name = 'PayrollStateError'
+  }
+}
+
+/**
+ * Thrown by the payroll service when required posting accounts are missing.
+ */
+export class PayrollConfigError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'PayrollConfigError'
+  }
+}
+
+/**
  * Map a thrown error from the service layer to an HTTP response.
  */
 export function mapError(err: unknown, locale: ApiLocale): NextResponse {
@@ -150,6 +200,11 @@ export function mapError(err: unknown, locale: ApiLocale): NextResponse {
   }
   if (err instanceof TenantContextError) {
     return unauthorized(locale)
+  }
+  if (err instanceof SubscriptionSuspendedError) {
+    // Phase 8 — SUSPENDED (write blocked) or CANCELLED (all blocked).
+    // Both surface as 402 Payment Required with a translated message.
+    return subscriptionSuspended(locale)
   }
   if (err instanceof ZodError) {
     const issues = (err as ZodError).issues.map((i) => ({
@@ -187,6 +242,21 @@ export function mapError(err: unknown, locale: ApiLocale): NextResponse {
     return NextResponse.json<ApiErrorBody>(
       { error: { code: 'INSUFFICIENT_STOCK', message: t('inventory.insufficientStock', locale) } },
       { status: 400 }
+    )
+  }
+  if (err instanceof PayrollStateError) {
+    // BAD_REQUEST for invalid input (bad period / no employees);
+    // CONFLICT for state-mismatch or duplicate-period (caller already has
+    // a run for that period).
+    if (err.code === 'NOT_DRAFT' || err.code === 'DUPLICATE_PERIOD') {
+      return conflict(locale, 'hr.cannotModify')
+    }
+    return badRequest(locale, 'hr.invalidInput')
+  }
+  if (err instanceof PayrollConfigError) {
+    return NextResponse.json<ApiErrorBody>(
+      { error: { code: 'PAYROLL_CONFIG', message: t('hr.configError', locale) } },
+      { status: 500 }
     )
   }
   return serverError(locale)

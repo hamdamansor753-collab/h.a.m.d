@@ -37,7 +37,7 @@ export async function POST(req: Request) {
           unitPrice: l.unitPrice,
         })),
       })
-    })
+    }, 'POST')
     if (result.status === 401) return ok({ authenticated: false }, 401)
     return ok(result, 201)
   } catch (err) {

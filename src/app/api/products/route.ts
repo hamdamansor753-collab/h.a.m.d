@@ -38,7 +38,7 @@ export async function POST(req: Request) {
         nameKey: parsed.data.nameKey,
         sellPrice: parsed.data.sellPrice,
       })
-    )
+    , 'POST')
     if (result.status === 401) return ok({ authenticated: false }, 401)
     return ok(result, 201)
   } catch (err) {

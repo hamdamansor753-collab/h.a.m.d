@@ -22,7 +22,7 @@ export async function POST(
 ) {
   try {
     const { id } = await params
-    const result = await withTenantContext(async () => receivePurchaseOrder(id))
+    const result = await withTenantContext(async () => receivePurchaseOrder(id), 'POST')
     if (result.status === 401) return ok({ authenticated: false }, 401)
     return ok(result)
   } catch (err) {

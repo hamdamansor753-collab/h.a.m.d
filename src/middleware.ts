@@ -29,6 +29,27 @@ const PROTECTED_PREFIXES = [
   '/api/purchase-orders',
   // Phase 3: POS
   '/api/pos',
+  // Manufacturing
+  '/api/bom',
+  '/api/production-orders',
+  // HR/Payroll
+  '/api/employees',
+  '/api/payroll-runs',
+  // CRM
+  '/api/customers',
+  '/api/appointments',
+  '/api/activity-log',
+  // Phase 8: super-admin billing — requires auth + platform:admin (the
+  // platform:admin check itself happens in the route handler via
+  // isPlatformAdmin(session.user.email); middleware only short-circuits
+  // the unauthenticated case to avoid spinning up the nodejs runtime).
+  '/api/admin',
+  // Phase 7/9: tenant branding + module activation. GET is open to any
+  // authenticated user; PATCH requires tenant:manage (enforced in the
+  // service layer). Middleware only short-circuits the unauthenticated
+  // case.
+  '/api/tenant/branding',
+  '/api/tenant/modules',
 ]
 
 export async function middleware(req: NextRequest) {

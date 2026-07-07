@@ -118,6 +118,16 @@ function getScopedClient(tenantId: string): PrismaClient {
       product: { $allOperations: makeScopedHandler('product', tenantId) },
       stockMovement: { $allOperations: makeScopedHandler('stockMovement', tenantId) },
       purchaseOrder: { $allOperations: makeScopedHandler('purchaseOrder', tenantId) },
+      // Manufacturing: BOM + ProductionOrder (both have tenantId)
+      billOfMaterials: { $allOperations: makeScopedHandler('billOfMaterials', tenantId) },
+      productionOrder: { $allOperations: makeScopedHandler('productionOrder', tenantId) },
+      // HR/Payroll: Employee + PayrollRun (both have tenantId; PayrollLine inherits)
+      employee: { $allOperations: makeScopedHandler('employee', tenantId) },
+      payrollRun: { $allOperations: makeScopedHandler('payrollRun', tenantId) },
+      // CRM: Customer + Appointment + ActivityLog (all have tenantId; Reminder inherits)
+      customer: { $allOperations: makeScopedHandler('customer', tenantId) },
+      appointment: { $allOperations: makeScopedHandler('appointment', tenantId) },
+      activityLog: { $allOperations: makeScopedHandler('activityLog', tenantId) },
     },
   }) as unknown as PrismaClient
   scopedClientCache.set(tenantId, cached)
@@ -137,6 +147,12 @@ function getScopedClient(tenantId: string): PrismaClient {
 const TENANT_SCOPED_DELEGATES = new Set([
   'user', 'account', 'journalEntry', 'invoice',
   'warehouse', 'product', 'stockMovement', 'purchaseOrder',
+  // Manufacturing
+  'billOfMaterials', 'productionOrder',
+  // HR/Payroll
+  'employee', 'payrollRun',
+  // CRM
+  'customer', 'appointment', 'activityLog',
 ])
 
 function createDbProxy(): PrismaClient {

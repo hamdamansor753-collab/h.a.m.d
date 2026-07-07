@@ -53,7 +53,7 @@ export async function PATCH(
           taxRate: l.taxRate,
         })),
       })
-    })
+    }, 'PATCH')
     if (result.status === 401) return ok({ authenticated: false }, 401)
     return ok(result)
   } catch (err) {
