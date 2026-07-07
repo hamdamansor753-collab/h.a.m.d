@@ -1,0 +1,870 @@
+==========================================
+[2026-07-08 00:03:22] Starting: bun install
+==========================================
+[BUN] Installing dependencies...
+[0.03ms] ".env"
+bun install v1.3.14 (0d9b296a)
+
+Checked 861 installs across 930 packages (no changes) [33.00ms]
+==========================================
+[2026-07-08 00:03:22] Completed: bun install
+[LOG] Step: bun install | Duration: 0s
+==========================================
+
+==========================================
+[2026-07-08 00:03:22] Starting: bun run db:push
+==========================================
+[BUN] Setting up database...
+$ prisma db push
+Environment variables loaded from .env
+Prisma schema loaded from prisma/schema.prisma
+Error: Prisma schema validation - (get-config wasm)
+Error code: P1012
+error: Environment variable not found: DIRECT_URL.
+  -->  prisma/schema.prisma:8
+   | 
+ 7 |   url       = env("DATABASE_URL")
+ 8 |   directUrl = env("DIRECT_URL")
+   | 
+
+Validation Error Count: 1
+[Context: getConfig]
+
+Prisma CLI Version : 6.19.2
+error: script "db:push" exited with code 1
+==========================================
+[2026-07-08 13:38:03] Starting: bun install
+==========================================
+[BUN] Installing dependencies...
+[0.16ms] ".env"
+bun install v1.3.14 (0d9b296a)
+
+Checked 861 installs across 930 packages (no changes) [42.00ms]
+==========================================
+[2026-07-08 13:38:03] Completed: bun install
+[LOG] Step: bun install | Duration: 0s
+==========================================
+
+==========================================
+[2026-07-08 13:38:03] Starting: bun run db:push
+==========================================
+[BUN] Setting up database...
+$ prisma db push
+Environment variables loaded from .env
+Prisma schema loaded from prisma/schema.prisma
+Datasource "db": PostgreSQL database "postgres", schema "public" at "aws-1-eu-west-2.pooler.supabase.com:5432"
+
+The database is already in sync with the Prisma schema.
+
+Running generate... (Use --skip-generate to skip the generators)
+[2K[1A[2K[GRunning generate... - Prisma Client
+[2K[1A[2K[G✔ Generated Prisma Client (v6.19.2) to ./node_modules/@prisma/client in 318ms
+
+==========================================
+[2026-07-08 13:38:15] Completed: bun run db:push
+[LOG] Step: bun run db:push | Duration: 12s
+==========================================
+
+==========================================
+[2026-07-08 13:38:15] Starting: Starting Next.js dev server
+==========================================
+[BUN] Starting development server...
+==========================================
+$ next dev -p 3000 2>&1 | tee dev.log
+[2026-07-08 13:38:15] Completed: Starting Next.js dev server
+[LOG] Step: Starting Next.js dev server | Duration: 0s
+==========================================
+
+==========================================
+[2026-07-08 13:38:15] Starting: Waiting for Next.js dev server
+==========================================
+Waiting for Next.js dev server to be ready on localhost:3000...
+Attempt 1/60: Next.js dev server not ready yet, waiting...
+▲ Next.js 16.1.3 (Turbopack)
+- Local:         http://localhost:3000
+- Network:       http://21.0.10.121:3000
+- Environments: .env
+
+✓ Starting...
+Attention: Next.js now collects completely anonymous telemetry regarding usage.
+This information is used to shape Next.js' roadmap and prioritize features.
+You can learn more, including how to opt-out if you'd not like to participate in this anonymous program, by visiting the following URL:
+https://nextjs.org/telemetry
+
+⚠ The "middleware" file convention is deprecated. Please use "proxy" instead. Learn more: https://nextjs.org/docs/messages/middleware-to-proxy
+✓ Ready in 1769ms
+○ Compiling / ...
+Attempt 2/60: Next.js dev server not ready yet, waiting...
+ GET / 200 in 3.1s (compile: 3.0s, render: 116ms)
+Next.js dev server is ready!
+==========================================
+ GET / 200 in 6.0s (compile: 5.9s, render: 120ms)
+[2026-07-08 13:38:25] Completed: Waiting for Next.js dev server
+[LOG] Step: Waiting for Next.js dev server | Duration: 10s
+==========================================
+
+==========================================
+[2026-07-08 13:38:25] Starting: Health check
+==========================================
+[BUN] Performing health check...
+ GET / 200 in 25ms (compile: 2ms, render: 23ms)
+[BUN] Health check passed
+==========================================
+[2026-07-08 13:38:25] Completed: Health check
+[LOG] Step: Health check | Duration: 0s
+==========================================
+
+==========================================
+[2026-07-08 13:38:25] Starting: Starting mini-services
+==========================================
+Found mini-services directory, scanning for sub-services...
+Mini-services startup completed. Started 0 service(s).
+==========================================
+[2026-07-08 13:38:25] Completed: Starting mini-services
+[LOG] Step: Starting mini-services | Duration: 0s
+==========================================
+
+Next.js dev server is running in background (PID: 1101).
+Use 'kill 1101' to stop it.
+prisma:error 
+Invalid `__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["db"].translation.findMany()` invocation in
+/home/z/my-project/.next/dev/server/chunks/[root-of-the-server]__1148656a._.js:502:161
+
+  499 async function loadTranslations() {
+  500     if (loadPromise) return loadPromise;
+  501     loadPromise = (async ()=>{
+→ 502         const rows = await __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["db"].translation.findMany(
+error: Error validating datasource `db`: the URL must start with the protocol `postgresql://` or `postgres://`.
+  -->  schema.prisma:7
+   | 
+ 6 |   provider  = "postgresql"
+ 7 |   url       = env("DATABASE_URL")
+   | 
+
+Validation Error Count: 1
+⨯ Error [PrismaClientInitializationError]: 
+Invalid `{imported module ./src/lib/db.ts}["db"].translation.findMany()` invocation in
+/home/z/my-project/.next/dev/server/chunks/[root-of-the-server]__1148656a._.js:502:161
+
+  499 async function loadTranslations() {
+  500     if (loadPromise) return loadPromise;
+  501     loadPromise = (async ()=>{
+→ 502         const rows = await {imported module ./src/lib/db.ts}["db"].translation.findMany(
+error: Error validating datasource `db`: the URL must start with the protocol `postgresql://` or `postgres://`.
+  -->  schema.prisma:7
+   | 
+ 6 |   provider  = "postgresql"
+ 7 |   url       = env("DATABASE_URL")
+   | 
+
+Validation Error Count: 1
+    at <unknown> (src/core/i18n/index.ts:31:39)
+    at <unknown> (-->  schema.prisma:7)
+    at async (src/core/i18n/index.ts:31:18)
+  29 |   if (loadPromise) return loadPromise
+  30 |   loadPromise = (async () => {
+> 31 |     const rows = await db.translation.findMany()
+     |                                       ^
+  32 |     for (const row of rows) {
+  33 |       if (!isLocale(row.locale)) continue
+  34 |       let dict = cache.get(row.locale) {
+  clientVersion: '6.19.2',
+  errorCode: undefined,
+  retryable: undefined
+}
+ GET /api/session 500 in 3.3s (compile: 2.9s, proxy.ts: 110ms, render: 199ms)
+Error [PrismaClientInitializationError]: 
+Invalid `{imported module ./src/lib/db.ts}["db"].translation.findMany()` invocation in
+/home/z/my-project/.next/dev/server/chunks/[root-of-the-server]__1148656a._.js:502:161
+
+  499 async function loadTranslations() {
+  500     if (loadPromise) return loadPromise;
+  501     loadPromise = (async ()=>{
+→ 502         const rows = await {imported module ./src/lib/db.ts}["db"].translation.findMany(
+error: Error validating datasource `db`: the URL must start with the protocol `postgresql://` or `postgres://`.
+  -->  schema.prisma:7
+   | 
+ 6 |   provider  = "postgresql"
+ 7 |   url       = env("DATABASE_URL")
+   | 
+
+Validation Error Count: 1
+    at <unknown> (src/core/i18n/index.ts:31:39)
+    at <unknown> (-->  schema.prisma:7)
+    at async (src/core/i18n/index.ts:31:18)
+  29 |   if (loadPromise) return loadPromise
+  30 |   loadPromise = (async () => {
+> 31 |     const rows = await db.translation.findMany()
+     |                                       ^
+  32 |     for (const row of rows) {
+  33 |       if (!isLocale(row.locale)) continue
+  34 |       let dict = cache.get(row.locale) {
+  clientVersion: '6.19.2',
+  errorCode: undefined,
+  retryable: undefined
+}
+⨯ unhandledRejection: Error [PrismaClientInitializationError]: 
+Invalid `{imported module ./src/lib/db.ts}["db"].translation.findMany()` invocation in
+/home/z/my-project/.next/dev/server/chunks/[root-of-the-server]__1148656a._.js:502:161
+
+  499 async function loadTranslations() {
+  500     if (loadPromise) return loadPromise;
+  501     loadPromise = (async ()=>{
+→ 502         const rows = await {imported module ./src/lib/db.ts}["db"].translation.findMany(
+error: Error validating datasource `db`: the URL must start with the protocol `postgresql://` or `postgres://`.
+  -->  schema.prisma:7
+   | 
+ 6 |   provider  = "postgresql"
+ 7 |   url       = env("DATABASE_URL")
+   | 
+
+Validation Error Count: 1
+    at <unknown> (src/core/i18n/index.ts:31:39)
+    at <unknown> (-->  schema.prisma:7)
+    at async (src/core/i18n/index.ts:31:18)
+  29 |   if (loadPromise) return loadPromise
+  30 |   loadPromise = (async () => {
+> 31 |     const rows = await db.translation.findMany()
+     |                                       ^
+  32 |     for (const row of rows) {
+  33 |       if (!isLocale(row.locale)) continue
+  34 |       let dict = cache.get(row.locale) {
+  clientVersion: '6.19.2',
+  errorCode: undefined,
+  retryable: undefined
+}
+⨯ unhandledRejection:  Error [PrismaClientInitializationError]: 
+Invalid `{imported module ./src/lib/db.ts}["db"].translation.findMany()` invocation in
+/home/z/my-project/.next/dev/server/chunks/[root-of-the-server]__1148656a._.js:502:161
+
+  499 async function loadTranslations() {
+  500     if (loadPromise) return loadPromise;
+  501     loadPromise = (async ()=>{
+→ 502         const rows = await {imported module ./src/lib/db.ts}["db"].translation.findMany(
+error: Error validating datasource `db`: the URL must start with the protocol `postgresql://` or `postgres://`.
+  -->  schema.prisma:7
+   | 
+ 6 |   provider  = "postgresql"
+ 7 |   url       = env("DATABASE_URL")
+   | 
+
+Validation Error Count: 1
+    at <unknown> (src/core/i18n/index.ts:31:39)
+    at <unknown> (-->  schema.prisma:7)
+    at async (src/core/i18n/index.ts:31:18)
+  29 |   if (loadPromise) return loadPromise
+  30 |   loadPromise = (async () => {
+> 31 |     const rows = await db.translation.findMany()
+     |                                       ^
+  32 |     for (const row of rows) {
+  33 |       if (!isLocale(row.locale)) continue
+  34 |       let dict = cache.get(row.locale) {
+  clientVersion: '6.19.2',
+  errorCode: undefined,
+  retryable: undefined
+}
+[next-auth][warn][NEXTAUTH_URL] 
+https://next-auth.js.org/warnings#nextauth_url
+ GET /api/auth/session 200 in 3.7s (compile: 3.7s, proxy.ts: 6ms, render: 37ms)
+prisma:error 
+Invalid `__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["db"].translation.findMany()` invocation in
+/home/z/my-project/.next/dev/server/chunks/[root-of-the-server]__1148656a._.js:502:161
+
+  499 async function loadTranslations() {
+  500     if (loadPromise) return loadPromise;
+  501     loadPromise = (async ()=>{
+→ 502         const rows = await __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["db"].translation.findMany(
+error: Error validating datasource `db`: the URL must start with the protocol `postgresql://` or `postgres://`.
+  -->  schema.prisma:7
+   | 
+ 6 |   provider  = "postgresql"
+ 7 |   url       = env("DATABASE_URL")
+   | 
+
+Validation Error Count: 1
+Unhandled Rejection: Error [PrismaClientInitializationError]: 
+Invalid `__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["db"].translation.findMany()` invocation in
+/home/z/my-project/.next/dev/server/chunks/[root-of-the-server]__1148656a._.js:502:161
+
+  499 async function loadTranslations() {
+  500     if (loadPromise) return loadPromise;
+  501     loadPromise = (async ()=>{
+→ 502         const rows = await __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["db"].translation.findMany(
+error: Error validating datasource `db`: the URL must start with the protocol `postgresql://` or `postgres://`.
+  -->  schema.prisma:7
+   | 
+ 6 |   provider  = "postgresql"
+ 7 |   url       = env("DATABASE_URL")
+   | 
+
+Validation Error Count: 1
+    at <unknown> (src/core/i18n/index.ts:31:39)
+    at <unknown> (-->  schema.prisma:7)
+    at async (src/core/i18n/index.ts:31:18)
+  29 |   if (loadPromise) return loadPromise
+  30 |   loadPromise = (async () => {
+> 31 |     const rows = await db.translation.findMany()
+     |                                       ^
+  32 |     for (const row of rows) {
+  33 |       if (!isLocale(row.locale)) continue
+  34 |       let dict = cache.get(row.locale) {
+  clientVersion: '6.19.2',
+  errorCode: undefined,
+  retryable: undefined
+}
+ GET /api/auth/providers 200 in 57ms (compile: 36ms, proxy.ts: 4ms, render: 17ms)
+ GET /api/auth/csrf 200 in 19ms (compile: 6ms, proxy.ts: 6ms, render: 7ms)
+prisma:error 
+Invalid `__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["db"].translation.findMany()` invocation in
+/home/z/my-project/.next/dev/server/chunks/[root-of-the-server]__1148656a._.js:502:161
+
+  499 async function loadTranslations() {
+  500     if (loadPromise) return loadPromise;
+  501     loadPromise = (async ()=>{
+→ 502         const rows = await __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["db"].translation.findMany(
+error: Error validating datasource `db`: the URL must start with the protocol `postgresql://` or `postgres://`.
+  -->  schema.prisma:7
+   | 
+ 6 |   provider  = "postgresql"
+ 7 |   url       = env("DATABASE_URL")
+   | 
+
+Validation Error Count: 1
+prisma:error 
+Invalid `__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["dbRaw"].user.findFirst()` invocation in
+/home/z/my-project/.next/dev/server/chunks/[root-of-the-server]__1148656a._.js:979:165
+
+  976 // this lookup MUST be cross-tenant and runs BEFORE any tenant
+  977 // context exists (the user isn't logged in yet). This is one of
+  978 // the three auditable uses of dbRaw: auth, seed, tests.
+→ 979 const user = await __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["dbRaw"].user.findFirst(
+error: Error validating datasource `db`: the URL must start with the protocol `postgresql://` or `postgres://`.
+  -->  schema.prisma:7
+   | 
+ 6 |   provider  = "postgresql"
+ 7 |   url       = env("DATABASE_URL")
+   | 
+
+Validation Error Count: 1
+ POST /api/auth/callback/credentials 401 in 131ms (compile: 58ms, proxy.ts: 9ms, render: 64ms)
+Unhandled Rejection: Error [PrismaClientInitializationError]: 
+Invalid `__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["db"].translation.findMany()` invocation in
+/home/z/my-project/.next/dev/server/chunks/[root-of-the-server]__1148656a._.js:502:161
+
+  499 async function loadTranslations() {
+  500     if (loadPromise) return loadPromise;
+  501     loadPromise = (async ()=>{
+→ 502         const rows = await __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["db"].translation.findMany(
+error: Error validating datasource `db`: the URL must start with the protocol `postgresql://` or `postgres://`.
+  -->  schema.prisma:7
+   | 
+ 6 |   provider  = "postgresql"
+ 7 |   url       = env("DATABASE_URL")
+   | 
+
+Validation Error Count: 1
+    at <unknown> (src/core/i18n/index.ts:31:39)
+    at <unknown> (-->  schema.prisma:7)
+    at async (src/core/i18n/index.ts:31:18)
+  29 |   if (loadPromise) return loadPromise
+  30 |   loadPromise = (async () => {
+> 31 |     const rows = await db.translation.findMany()
+     |                                       ^
+  32 |     for (const row of rows) {
+  33 |       if (!isLocale(row.locale)) continue
+  34 |       let dict = cache.get(row.locale) {
+  clientVersion: '6.19.2',
+  errorCode: undefined,
+  retryable: undefined
+}
+prisma:error 
+Invalid `__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["db"].translation.findMany()` invocation in
+/home/z/my-project/.next/dev/server/chunks/[root-of-the-server]__1148656a._.js:502:161
+
+  499 async function loadTranslations() {
+  500     if (loadPromise) return loadPromise;
+  501     loadPromise = (async ()=>{
+→ 502         const rows = await __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["db"].translation.findMany(
+error: Error validating datasource `db`: the URL must start with the protocol `postgresql://` or `postgres://`.
+  -->  schema.prisma:7
+   | 
+ 6 |   provider  = "postgresql"
+ 7 |   url       = env("DATABASE_URL")
+   | 
+
+Validation Error Count: 1
+Unhandled Rejection: Error [PrismaClientInitializationError]: 
+Invalid `__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["db"].translation.findMany()` invocation in
+/home/z/my-project/.next/dev/server/chunks/[root-of-the-server]__1148656a._.js:502:161
+
+  499 async function loadTranslations() {
+  500     if (loadPromise) return loadPromise;
+  501     loadPromise = (async ()=>{
+→ 502         const rows = await __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["db"].translation.findMany(
+error: Error validating datasource `db`: the URL must start with the protocol `postgresql://` or `postgres://`.
+  -->  schema.prisma:7
+   | 
+ 6 |   provider  = "postgresql"
+ 7 |   url       = env("DATABASE_URL")
+   | 
+
+Validation Error Count: 1
+    at <unknown> (src/core/i18n/index.ts:31:39)
+    at <unknown> (-->  schema.prisma:7)
+    at async (src/core/i18n/index.ts:31:18)
+  29 |   if (loadPromise) return loadPromise
+  30 |   loadPromise = (async () => {
+> 31 |     const rows = await db.translation.findMany()
+     |                                       ^
+  32 |     for (const row of rows) {
+  33 |       if (!isLocale(row.locale)) continue
+  34 |       let dict = cache.get(row.locale) {
+  clientVersion: '6.19.2',
+  errorCode: undefined,
+  retryable: undefined
+}
+ GET /api/auth/providers 200 in 59ms (compile: 40ms, proxy.ts: 4ms, render: 15ms)
+ GET /api/auth/csrf 200 in 21ms (compile: 7ms, proxy.ts: 5ms, render: 9ms)
+prisma:error 
+Invalid `__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["dbRaw"].user.findFirst()` invocation in
+/home/z/my-project/.next/dev/server/chunks/[root-of-the-server]__1148656a._.js:979:165
+
+  976 // this lookup MUST be cross-tenant and runs BEFORE any tenant
+  977 // context exists (the user isn't logged in yet). This is one of
+  978 // the three auditable uses of dbRaw: auth, seed, tests.
+→ 979 const user = await __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["dbRaw"].user.findFirst(
+error: Error validating datasource `db`: the URL must start with the protocol `postgresql://` or `postgres://`.
+  -->  schema.prisma:7
+   | 
+ 6 |   provider  = "postgresql"
+ 7 |   url       = env("DATABASE_URL")
+   | 
+
+Validation Error Count: 1
+ POST /api/auth/callback/credentials 401 in 27ms (compile: 6ms, proxy.ts: 5ms, render: 15ms)
+prisma:error 
+Invalid `__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["db"].translation.findMany()` invocation in
+/home/z/my-project/.next/dev/server/chunks/[root-of-the-server]__1148656a._.js:502:161
+
+  499 async function loadTranslations() {
+  500     if (loadPromise) return loadPromise;
+  501     loadPromise = (async ()=>{
+→ 502         const rows = await __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["db"].translation.findMany(
+error: Error validating datasource `db`: the URL must start with the protocol `postgresql://` or `postgres://`.
+  -->  schema.prisma:7
+   | 
+ 6 |   provider  = "postgresql"
+ 7 |   url       = env("DATABASE_URL")
+   | 
+
+Validation Error Count: 1
+Unhandled Rejection: Error [PrismaClientInitializationError]: 
+Invalid `__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["db"].translation.findMany()` invocation in
+/home/z/my-project/.next/dev/server/chunks/[root-of-the-server]__1148656a._.js:502:161
+
+  499 async function loadTranslations() {
+  500     if (loadPromise) return loadPromise;
+  501     loadPromise = (async ()=>{
+→ 502         const rows = await __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["db"].translation.findMany(
+error: Error validating datasource `db`: the URL must start with the protocol `postgresql://` or `postgres://`.
+  -->  schema.prisma:7
+   | 
+ 6 |   provider  = "postgresql"
+ 7 |   url       = env("DATABASE_URL")
+   | 
+
+Validation Error Count: 1
+    at <unknown> (src/core/i18n/index.ts:31:39)
+    at <unknown> (-->  schema.prisma:7)
+    at async (src/core/i18n/index.ts:31:18)
+  29 |   if (loadPromise) return loadPromise
+  30 |   loadPromise = (async () => {
+> 31 |     const rows = await db.translation.findMany()
+     |                                       ^
+  32 |     for (const row of rows) {
+  33 |       if (!isLocale(row.locale)) continue
+  34 |       let dict = cache.get(row.locale) {
+  clientVersion: '6.19.2',
+  errorCode: undefined,
+  retryable: undefined
+}
+⨯ Error [PrismaClientInitializationError]: 
+Invalid `{imported module ./src/lib/db.ts}["db"].translation.findMany()` invocation in
+/home/z/my-project/.next/dev/server/chunks/[root-of-the-server]__1148656a._.js:502:161
+
+  499 async function loadTranslations() {
+  500     if (loadPromise) return loadPromise;
+  501     loadPromise = (async ()=>{
+→ 502         const rows = await {imported module ./src/lib/db.ts}["db"].translation.findMany(
+error: Error validating datasource `db`: the URL must start with the protocol `postgresql://` or `postgres://`.
+  -->  schema.prisma:7
+   | 
+ 6 |   provider  = "postgresql"
+ 7 |   url       = env("DATABASE_URL")
+   | 
+
+Validation Error Count: 1
+    at <unknown> (src/core/i18n/index.ts:31:39)
+    at <unknown> (-->  schema.prisma:7)
+    at async (src/core/i18n/index.ts:31:18)
+  29 |   if (loadPromise) return loadPromise
+  30 |   loadPromise = (async () => {
+> 31 |     const rows = await db.translation.findMany()
+     |                                       ^
+  32 |     for (const row of rows) {
+  33 |       if (!isLocale(row.locale)) continue
+  34 |       let dict = cache.get(row.locale) {
+  clientVersion: '6.19.2',
+  errorCode: undefined,
+  retryable: undefined
+}
+ GET /api/i18n/dictionary?locale=ar-EG 500 in 351ms (compile: 261ms, proxy.ts: 8ms, render: 82ms)
+⨯ Error [PrismaClientInitializationError]: 
+Invalid `{imported module ./src/lib/db.ts}["db"].translation.findMany()` invocation in
+/home/z/my-project/.next/dev/server/chunks/[root-of-the-server]__1148656a._.js:502:161
+
+  499 async function loadTranslations() {
+  500     if (loadPromise) return loadPromise;
+  501     loadPromise = (async ()=>{
+→ 502         const rows = await {imported module ./src/lib/db.ts}["db"].translation.findMany(
+error: Error validating datasource `db`: the URL must start with the protocol `postgresql://` or `postgres://`.
+  -->  schema.prisma:7
+   | 
+ 6 |   provider  = "postgresql"
+ 7 |   url       = env("DATABASE_URL")
+   | 
+
+Validation Error Count: 1
+    at <unknown> (src/core/i18n/index.ts:31:39)
+    at <unknown> (-->  schema.prisma:7)
+    at async (src/core/i18n/index.ts:31:18)
+  29 |   if (loadPromise) return loadPromise
+  30 |   loadPromise = (async () => {
+> 31 |     const rows = await db.translation.findMany()
+     |                                       ^
+  32 |     for (const row of rows) {
+  33 |       if (!isLocale(row.locale)) continue
+  34 |       let dict = cache.get(row.locale) {
+  clientVersion: '6.19.2',
+  errorCode: undefined,
+  retryable: undefined
+}
+ GET /api/i18n/dictionary?locale=ar-SA 500 in 75ms (compile: 2ms, proxy.ts: 3ms, render: 69ms)
+ GET / 200 in 74ms (compile: 3ms, render: 70ms)
+ GET / 200 in 27ms (compile: 1869µs, render: 25ms)
+ GET / 200 in 25ms (compile: 2ms, render: 23ms)
+ GET /api/auth/session 200 in 69ms (compile: 46ms, proxy.ts: 4ms, render: 18ms)
+⨯ Error [PrismaClientInitializationError]: 
+Invalid `{imported module ./src/lib/db.ts}["db"].translation.findMany()` invocation in
+/home/z/my-project/.next/dev/server/chunks/[root-of-the-server]__1148656a._.js:502:161
+
+  499 async function loadTranslations() {
+  500     if (loadPromise) return loadPromise;
+  501     loadPromise = (async ()=>{
+→ 502         const rows = await {imported module ./src/lib/db.ts}["db"].translation.findMany(
+error: Error validating datasource `db`: the URL must start with the protocol `postgresql://` or `postgres://`.
+  -->  schema.prisma:7
+   | 
+ 6 |   provider  = "postgresql"
+ 7 |   url       = env("DATABASE_URL")
+   | 
+
+Validation Error Count: 1
+    at <unknown> (src/core/i18n/index.ts:31:39)
+    at <unknown> (-->  schema.prisma:7)
+    at async (src/core/i18n/index.ts:31:18)
+  29 |   if (loadPromise) return loadPromise
+  30 |   loadPromise = (async () => {
+> 31 |     const rows = await db.translation.findMany()
+     |                                       ^
+  32 |     for (const row of rows) {
+  33 |       if (!isLocale(row.locale)) continue
+  34 |       let dict = cache.get(row.locale) {
+  clientVersion: '6.19.2',
+  errorCode: undefined,
+  retryable: undefined
+}
+ GET /api/session 500 in 86ms (compile: 4ms, proxy.ts: 11ms, render: 72ms)
+prisma:error 
+Invalid `__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["db"].translation.findMany()` invocation in
+/home/z/my-project/.next/dev/server/chunks/[root-of-the-server]__1148656a._.js:502:161
+
+  499 async function loadTranslations() {
+  500     if (loadPromise) return loadPromise;
+  501     loadPromise = (async ()=>{
+→ 502         const rows = await __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["db"].translation.findMany(
+error: Error validating datasource `db`: the URL must start with the protocol `postgresql://` or `postgres://`.
+  -->  schema.prisma:7
+   | 
+ 6 |   provider  = "postgresql"
+ 7 |   url       = env("DATABASE_URL")
+   | 
+
+Validation Error Count: 1
+Unhandled Rejection: Error [PrismaClientInitializationError]: 
+Invalid `__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["db"].translation.findMany()` invocation in
+/home/z/my-project/.next/dev/server/chunks/[root-of-the-server]__1148656a._.js:502:161
+
+  499 async function loadTranslations() {
+  500     if (loadPromise) return loadPromise;
+  501     loadPromise = (async ()=>{
+→ 502         const rows = await __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["db"].translation.findMany(
+error: Error validating datasource `db`: the URL must start with the protocol `postgresql://` or `postgres://`.
+  -->  schema.prisma:7
+   | 
+ 6 |   provider  = "postgresql"
+ 7 |   url       = env("DATABASE_URL")
+   | 
+
+Validation Error Count: 1
+    at <unknown> (src/core/i18n/index.ts:31:39)
+    at <unknown> (-->  schema.prisma:7)
+    at async (src/core/i18n/index.ts:31:18)
+  29 |   if (loadPromise) return loadPromise
+  30 |   loadPromise = (async () => {
+> 31 |     const rows = await db.translation.findMany()
+     |                                       ^
+  32 |     for (const row of rows) {
+  33 |       if (!isLocale(row.locale)) continue
+  34 |       let dict = cache.get(row.locale) {
+  clientVersion: '6.19.2',
+  errorCode: undefined,
+  retryable: undefined
+}
+ GET /api/auth/providers 200 in 52ms (compile: 34ms, proxy.ts: 3ms, render: 15ms)
+ GET /api/auth/csrf 200 in 26ms (compile: 10ms, proxy.ts: 6ms, render: 10ms)
+prisma:error 
+Invalid `__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["db"].translation.findMany()` invocation in
+/home/z/my-project/.next/dev/server/chunks/[root-of-the-server]__1148656a._.js:502:161
+
+  499 async function loadTranslations() {
+  500     if (loadPromise) return loadPromise;
+  501     loadPromise = (async ()=>{
+→ 502         const rows = await __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["db"].translation.findMany(
+error: Error validating datasource `db`: the URL must start with the protocol `postgresql://` or `postgres://`.
+  -->  schema.prisma:7
+   | 
+ 6 |   provider  = "postgresql"
+ 7 |   url       = env("DATABASE_URL")
+   | 
+
+Validation Error Count: 1
+Unhandled Rejection: Error [PrismaClientInitializationError]: 
+Invalid `__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["db"].translation.findMany()` invocation in
+/home/z/my-project/.next/dev/server/chunks/[root-of-the-server]__1148656a._.js:502:161
+
+  499 async function loadTranslations() {
+  500     if (loadPromise) return loadPromise;
+  501     loadPromise = (async ()=>{
+→ 502         const rows = await __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["db"].translation.findMany(
+error: Error validating datasource `db`: the URL must start with the protocol `postgresql://` or `postgres://`.
+  -->  schema.prisma:7
+   | 
+ 6 |   provider  = "postgresql"
+ 7 |   url       = env("DATABASE_URL")
+   | 
+
+Validation Error Count: 1
+    at <unknown> (src/core/i18n/index.ts:31:39)
+    at <unknown> (-->  schema.prisma:7)
+    at async (src/core/i18n/index.ts:31:18)
+  29 |   if (loadPromise) return loadPromise
+  30 |   loadPromise = (async () => {
+> 31 |     const rows = await db.translation.findMany()
+     |                                       ^
+  32 |     for (const row of rows) {
+  33 |       if (!isLocale(row.locale)) continue
+  34 |       let dict = cache.get(row.locale) {
+  clientVersion: '6.19.2',
+  errorCode: undefined,
+  retryable: undefined
+}
+prisma:error 
+Invalid `__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["dbRaw"].user.findFirst()` invocation in
+/home/z/my-project/.next/dev/server/chunks/[root-of-the-server]__1148656a._.js:979:165
+
+  976 // this lookup MUST be cross-tenant and runs BEFORE any tenant
+  977 // context exists (the user isn't logged in yet). This is one of
+  978 // the three auditable uses of dbRaw: auth, seed, tests.
+→ 979 const user = await __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["dbRaw"].user.findFirst(
+error: Error validating datasource `db`: the URL must start with the protocol `postgresql://` or `postgres://`.
+  -->  schema.prisma:7
+   | 
+ 6 |   provider  = "postgresql"
+ 7 |   url       = env("DATABASE_URL")
+   | 
+
+Validation Error Count: 1
+ POST /api/auth/callback/credentials 401 in 100ms (compile: 48ms, proxy.ts: 5ms, render: 47ms)
+prisma:error 
+Invalid `__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["db"].translation.findMany()` invocation in
+/home/z/my-project/.next/dev/server/chunks/[root-of-the-server]__1148656a._.js:502:161
+
+  499 async function loadTranslations() {
+  500     if (loadPromise) return loadPromise;
+  501     loadPromise = (async ()=>{
+→ 502         const rows = await __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["db"].translation.findMany(
+error: Error validating datasource `db`: the URL must start with the protocol `postgresql://` or `postgres://`.
+  -->  schema.prisma:7
+   | 
+ 6 |   provider  = "postgresql"
+ 7 |   url       = env("DATABASE_URL")
+   | 
+
+Validation Error Count: 1
+Unhandled Rejection: Error [PrismaClientInitializationError]: 
+Invalid `__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["db"].translation.findMany()` invocation in
+/home/z/my-project/.next/dev/server/chunks/[root-of-the-server]__1148656a._.js:502:161
+
+  499 async function loadTranslations() {
+  500     if (loadPromise) return loadPromise;
+  501     loadPromise = (async ()=>{
+→ 502         const rows = await __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["db"].translation.findMany(
+error: Error validating datasource `db`: the URL must start with the protocol `postgresql://` or `postgres://`.
+  -->  schema.prisma:7
+   | 
+ 6 |   provider  = "postgresql"
+ 7 |   url       = env("DATABASE_URL")
+   | 
+
+Validation Error Count: 1
+    at <unknown> (src/core/i18n/index.ts:31:39)
+    at <unknown> (-->  schema.prisma:7)
+    at async (src/core/i18n/index.ts:31:18)
+  29 |   if (loadPromise) return loadPromise
+  30 |   loadPromise = (async () => {
+> 31 |     const rows = await db.translation.findMany()
+     |                                       ^
+  32 |     for (const row of rows) {
+  33 |       if (!isLocale(row.locale)) continue
+  34 |       let dict = cache.get(row.locale) {
+  clientVersion: '6.19.2',
+  errorCode: undefined,
+  retryable: undefined
+}
+ GET / 200 in 40ms (compile: 4ms, render: 36ms)
+⨯ Error [PrismaClientInitializationError]: 
+Invalid `{imported module ./src/lib/db.ts}["db"].translation.findMany()` invocation in
+/home/z/my-project/.next/dev/server/chunks/[root-of-the-server]__1148656a._.js:502:161
+
+  499 async function loadTranslations() {
+  500     if (loadPromise) return loadPromise;
+  501     loadPromise = (async ()=>{
+→ 502         const rows = await {imported module ./src/lib/db.ts}["db"].translation.findMany(
+error: Error validating datasource `db`: the URL must start with the protocol `postgresql://` or `postgres://`.
+  -->  schema.prisma:7
+   | 
+ 6 |   provider  = "postgresql"
+ 7 |   url       = env("DATABASE_URL")
+   | 
+
+Validation Error Count: 1
+    at <unknown> (src/core/i18n/index.ts:31:39)
+    at <unknown> (-->  schema.prisma:7)
+    at async (src/core/i18n/index.ts:31:18)
+  29 |   if (loadPromise) return loadPromise
+  30 |   loadPromise = (async () => {
+> 31 |     const rows = await db.translation.findMany()
+     |                                       ^
+  32 |     for (const row of rows) {
+  33 |       if (!isLocale(row.locale)) continue
+  34 |       let dict = cache.get(row.locale) {
+  clientVersion: '6.19.2',
+  errorCode: undefined,
+  retryable: undefined
+}
+ GET /api/session 500 in 81ms (compile: 5ms, proxy.ts: 6ms, render: 70ms)
+ GET /api/auth/session 200 in 210ms (compile: 152ms, proxy.ts: 2ms, render: 55ms)
+prisma:error 
+Invalid `__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["db"].translation.findMany()` invocation in
+/home/z/my-project/.next/dev/server/chunks/[root-of-the-server]__1148656a._.js:502:161
+
+  499 async function loadTranslations() {
+  500     if (loadPromise) return loadPromise;
+  501     loadPromise = (async ()=>{
+→ 502         const rows = await __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["db"].translation.findMany(
+error: Error validating datasource `db`: the URL must start with the protocol `postgresql://` or `postgres://`.
+  -->  schema.prisma:7
+   | 
+ 6 |   provider  = "postgresql"
+ 7 |   url       = env("DATABASE_URL")
+   | 
+
+Validation Error Count: 1
+Unhandled Rejection: Error [PrismaClientInitializationError]: 
+Invalid `__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["db"].translation.findMany()` invocation in
+/home/z/my-project/.next/dev/server/chunks/[root-of-the-server]__1148656a._.js:502:161
+
+  499 async function loadTranslations() {
+  500     if (loadPromise) return loadPromise;
+  501     loadPromise = (async ()=>{
+→ 502         const rows = await __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["db"].translation.findMany(
+error: Error validating datasource `db`: the URL must start with the protocol `postgresql://` or `postgres://`.
+  -->  schema.prisma:7
+   | 
+ 6 |   provider  = "postgresql"
+ 7 |   url       = env("DATABASE_URL")
+   | 
+
+Validation Error Count: 1
+    at <unknown> (src/core/i18n/index.ts:31:39)
+    at <unknown> (-->  schema.prisma:7)
+    at async (src/core/i18n/index.ts:31:18)
+  29 |   if (loadPromise) return loadPromise
+  30 |   loadPromise = (async () => {
+> 31 |     const rows = await db.translation.findMany()
+     |                                       ^
+  32 |     for (const row of rows) {
+  33 |       if (!isLocale(row.locale)) continue
+  34 |       let dict = cache.get(row.locale) {
+  clientVersion: '6.19.2',
+  errorCode: undefined,
+  retryable: undefined
+}
+ GET /api/auth/session 200 in 73ms (compile: 49ms, proxy.ts: 3ms, render: 20ms)
+prisma:error 
+Invalid `__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["db"].translation.findMany()` invocation in
+/home/z/my-project/.next/dev/server/chunks/[root-of-the-server]__1148656a._.js:502:161
+
+  499 async function loadTranslations() {
+  500     if (loadPromise) return loadPromise;
+  501     loadPromise = (async ()=>{
+→ 502         const rows = await __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["db"].translation.findMany(
+error: Error validating datasource `db`: the URL must start with the protocol `postgresql://` or `postgres://`.
+  -->  schema.prisma:7
+   | 
+ 6 |   provider  = "postgresql"
+ 7 |   url       = env("DATABASE_URL")
+   | 
+
+Validation Error Count: 1
+Unhandled Rejection: Error [PrismaClientInitializationError]: 
+Invalid `__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["db"].translation.findMany()` invocation in
+/home/z/my-project/.next/dev/server/chunks/[root-of-the-server]__1148656a._.js:502:161
+
+  499 async function loadTranslations() {
+  500     if (loadPromise) return loadPromise;
+  501     loadPromise = (async ()=>{
+→ 502         const rows = await __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["db"].translation.findMany(
+error: Error validating datasource `db`: the URL must start with the protocol `postgresql://` or `postgres://`.
+  -->  schema.prisma:7
+   | 
+ 6 |   provider  = "postgresql"
+ 7 |   url       = env("DATABASE_URL")
+   | 
+
+Validation Error Count: 1
+    at <unknown> (src/core/i18n/index.ts:31:39)
+    at <unknown> (-->  schema.prisma:7)
+    at async (src/core/i18n/index.ts:31:18)
+  29 |   if (loadPromise) return loadPromise
+  30 |   loadPromise = (async () => {
+> 31 |     const rows = await db.translation.findMany()
+     |                                       ^
+  32 |     for (const row of rows) {
+  33 |       if (!isLocale(row.locale)) continue
+  34 |       let dict = cache.get(row.locale) {
+  clientVersion: '6.19.2',
+  errorCode: undefined,
+  retryable: undefined
+}
