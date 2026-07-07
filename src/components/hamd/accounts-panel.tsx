@@ -187,7 +187,7 @@ export function AccountsPanel({ canCreate }: Props) {
           ) : tree.length === 0 ? (
             <div className="py-8 text-center text-sm text-muted-foreground">{t('account.empty')}</div>
           ) : (
-            <div className="max-h-[60vh] overflow-y-auto hamd-scroll">
+            <div className="max-h-[60vh] overflow-auto hamd-scroll">
               <TreeRows nodes={tree} depth={0} />
             </div>
           )}

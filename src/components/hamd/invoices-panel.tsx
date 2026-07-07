@@ -173,7 +173,7 @@ export function InvoicesPanel({ canCreate, canPost, canVoid }: Props) {
           ) : invoices.length === 0 ? (
             <div className="py-8 text-center text-sm text-muted-foreground">{t('invoice.empty')}</div>
           ) : (
-            <div className="max-h-[60vh] overflow-y-auto hamd-scroll space-y-2">
+            <div className="max-h-[60vh] overflow-auto hamd-scroll space-y-2">
               {invoices.map((inv) => {
                 const totals = lineTotals(inv.lines)
                 return (

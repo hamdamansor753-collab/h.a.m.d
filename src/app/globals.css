@@ -202,4 +202,22 @@
     background-color: var(--muted-foreground);
     border-radius: 3px;
   }
+
+  /* Mobile drawer slide-in animation */
+  @keyframes slide-in-from-start {
+    from { transform: translateX(-100%); }
+    to { transform: translateX(0); }
+  }
+  [dir="rtl"] .animate-in.slide-in-from-start {
+    animation: slide-in-from-start 0.2s ease-out;
+    transform: translateX(100%);
+    animation-name: slide-in-from-end-rtl;
+  }
+  @keyframes slide-in-from-end-rtl {
+    from { transform: translateX(100%); }
+    to { transform: translateX(0); }
+  }
+  .animate-in {
+    animation: slide-in-from-start 0.2s ease-out;
+  }
 }

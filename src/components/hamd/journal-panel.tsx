@@ -254,7 +254,7 @@ export function JournalPanel({ canCreate }: Props) {
           ) : entries.length === 0 ? (
             <div className="py-8 text-center text-sm text-muted-foreground">{t('journal.empty')}</div>
           ) : (
-            <div className="max-h-[60vh] overflow-y-auto hamd-scroll space-y-3">
+            <div className="max-h-[60vh] overflow-auto hamd-scroll space-y-3">
               {entries.map((entry) => {
                 const d = entry.lines.reduce((s, l) => s + Number(l.debit), 0)
                 const c = entry.lines.reduce((s, l) => s + Number(l.credit), 0)

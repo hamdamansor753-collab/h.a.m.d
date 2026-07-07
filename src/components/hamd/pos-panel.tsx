@@ -234,7 +234,7 @@ export function PosPanel({ canSell }: Props) {
                   placeholder={t('pos.searchProducts')}
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  className="ps-9"
+                  className="ps-9 h-11"
                 />
               </div>
             </CardContent>
@@ -247,7 +247,7 @@ export function PosPanel({ canSell }: Props) {
               </CardContent>
             </Card>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-3">
               {filteredProducts.map((p) => {
                 const stock = getStock(p.id)
                 const outOfStock = stock <= 0
@@ -262,14 +262,14 @@ export function PosPanel({ canSell }: Props) {
                         : 'hover:border-accent hover:bg-accent/5 cursor-pointer'
                     }`}
                   >
-                    <div className="flex items-start justify-between gap-2 mb-1">
-                      <span className="font-mono text-xs text-muted-foreground">{p.sku}</span>
-                      <Badge variant="outline" className={`text-[10px] ${outOfStock ? 'bg-danger/10 text-danger' : 'bg-success/10 text-success'}`}>
+                    <div className="flex items-start justify-between gap-1 mb-1">
+                      <span className="font-mono text-[10px] sm:text-xs text-muted-foreground truncate">{p.sku}</span>
+                      <Badge variant="outline" className={`text-[9px] sm:text-[10px] shrink-0 ${outOfStock ? 'bg-danger/10 text-danger' : 'bg-success/10 text-success'}`}>
                         {t('pos.stock')}: {formatNumber(stock, { minimumFractionDigits: 0 })}
                       </Badge>
                     </div>
-                    <div className="text-sm font-medium mb-2">{t(p.nameKey)}</div>
-                    <div className="text-lg font-mono font-bold text-accent">
+                    <div className="text-xs sm:text-sm font-medium mb-1 sm:mb-2 leading-tight">{t(p.nameKey)}</div>
+                    <div className="text-base sm:text-lg font-mono font-bold text-accent">
                       {formatNumber(Number(p.sellPrice), { minimumFractionDigits: 2 })}
                     </div>
                   </button>
