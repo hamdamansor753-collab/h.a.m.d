@@ -92,7 +92,7 @@ export const authOptions: NextAuthOptions = {
         const user = await dbRaw.user.findFirst({
           where: { email: creds.email.toLowerCase() },
           include: {
-            UserRole: { include: { Role: { include: { Permission: true } } } },
+            roles: { include: { role: { include: { permissions: true } } } },
           },
         })
         if (!user) return null
@@ -100,9 +100,9 @@ export const authOptions: NextAuthOptions = {
         const ok = await bcrypt.compare(creds.password, user.passwordHash)
         if (!ok) return null
 
-        const roleKeys = user.UserRole.map((ur) => ur.Role.name)
+        const roleKeys = user.roles.map((ur) => ur.role.name)
         const permissionKeys = Array.from(
-          new Set(user.UserRole.flatMap((ur) => ur.Role.Permission.map((p) => p.key)))
+          new Set(user.roles.flatMap((ur) => ur.role.permissions.map((p) => p.key)))
         )
 
         return {

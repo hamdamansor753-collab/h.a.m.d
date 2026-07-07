@@ -116,7 +116,8 @@ export function InventoryPanel({ canAdjust }: Props) {
             <div className="py-8 text-center text-sm text-muted-foreground">{t('inventory.empty')}</div>
           ) : (
             <div className="max-h-96 overflow-y-auto hamd-scroll">
-              <div className="grid grid-cols-12 gap-2 text-xs font-medium text-muted-foreground px-2 py-1 border-b border-border">
+              {/* Desktop table header — hidden on mobile */}
+              <div className="hidden sm:grid grid-cols-12 gap-2 text-xs font-medium text-muted-foreground px-2 py-1 border-b border-border">
                 <div className="col-span-2">{t('inventory.sku')}</div>
                 <div className="col-span-3">{t('inventory.name')}</div>
                 <div className="col-span-2 text-end">{t('inventory.costPrice')}</div>
@@ -124,15 +125,45 @@ export function InventoryPanel({ canAdjust }: Props) {
                 <div className="col-span-3 text-end">{t('inventory.stock')}</div>
               </div>
               {products.map((p) => (
-                <div key={p.id} className="grid grid-cols-12 gap-2 px-2 py-2 border-b border-border/50 text-sm items-center">
-                  <div className="col-span-2 font-mono text-xs">{p.sku}</div>
-                  <div className="col-span-3">{t(p.nameKey)}</div>
-                  <div className="col-span-2 text-end font-mono">{formatNumber(Number(p.costPrice), { minimumFractionDigits: 2 })}</div>
-                  <div className="col-span-2 text-end font-mono">{formatNumber(Number(p.sellPrice), { minimumFractionDigits: 2 })}</div>
-                  <div className="col-span-3 text-end">
-                    <span className="font-mono font-medium">{formatNumber(totalStock(p), { minimumFractionDigits: 0 })}</span>
+                <div key={p.id}>
+                  {/* Desktop row — hidden on mobile */}
+                  <div className="hidden sm:grid grid-cols-12 gap-2 px-2 py-2 border-b border-border/50 text-sm items-center">
+                    <div className="col-span-2 font-mono text-xs">{p.sku}</div>
+                    <div className="col-span-3">{t(p.nameKey)}</div>
+                    <div className="col-span-2 text-end font-mono">{formatNumber(Number(p.costPrice), { minimumFractionDigits: 2 })}</div>
+                    <div className="col-span-2 text-end font-mono">{formatNumber(Number(p.sellPrice), { minimumFractionDigits: 2 })}</div>
+                    <div className="col-span-3 text-end">
+                      <span className="font-mono font-medium">{formatNumber(totalStock(p), { minimumFractionDigits: 0 })}</span>
+                      {p.stockLevels.length > 0 && (
+                        <div className="text-[10px] text-muted-foreground">
+                          {p.stockLevels.map((sl) => `${t(sl.warehouse.nameKey)}: ${Number(sl.quantity)}`).join(' · ')}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  {/* Mobile card — hidden on sm+ */}
+                  <div className="sm:hidden rounded-md border border-border/60 p-3 mb-2">
+                    <div className="flex items-start justify-between gap-2 mb-2">
+                      <div className="min-w-0">
+                        <div className="font-mono text-[10px] text-muted-foreground">{p.sku}</div>
+                        <div className="text-sm font-medium truncate">{t(p.nameKey)}</div>
+                      </div>
+                      <Badge variant="outline" className="text-[10px] shrink-0">
+                        {t('inventory.stock')}: {formatNumber(totalStock(p), { minimumFractionDigits: 0 })}
+                      </Badge>
+                    </div>
+                    <div className="flex justify-between text-xs">
+                      <div>
+                        <div className="text-muted-foreground">{t('inventory.costPrice')}</div>
+                        <div className="font-mono">{formatNumber(Number(p.costPrice), { minimumFractionDigits: 2 })}</div>
+                      </div>
+                      <div className="text-end">
+                        <div className="text-muted-foreground">{t('inventory.sellPrice')}</div>
+                        <div className="font-mono font-medium text-accent">{formatNumber(Number(p.sellPrice), { minimumFractionDigits: 2 })}</div>
+                      </div>
+                    </div>
                     {p.stockLevels.length > 0 && (
-                      <div className="text-[10px] text-muted-foreground">
+                      <div className="text-[10px] text-muted-foreground mt-2 pt-2 border-t border-border/40">
                         {p.stockLevels.map((sl) => `${t(sl.warehouse.nameKey)}: ${Number(sl.quantity)}`).join(' · ')}
                       </div>
                     )}

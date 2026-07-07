@@ -343,41 +343,86 @@ function InvoiceForm({
 
           <div className="space-y-2">
             <Label>{t('invoice.lines')}</Label>
-            <div className="grid grid-cols-12 gap-2 text-xs font-medium text-muted-foreground px-1">
+            {/* Desktop header — hidden on mobile */}
+            <div className="hidden sm:grid grid-cols-12 gap-2 text-xs font-medium text-muted-foreground px-1">
               <div className="col-span-6">{t('invoice.description')}</div>
               <div className="col-span-3 text-end">{t('invoice.amount')}</div>
               <div className="col-span-2 text-end">{t('invoice.taxRate')}</div>
               <div className="col-span-1"></div>
             </div>
             {lines.map((l, i) => (
-              <div key={i} className="grid grid-cols-12 gap-2 items-center">
-                <Input
-                  className="col-span-6"
-                  placeholder={t('invoice.description')}
-                  value={l.description}
-                  onChange={(e) => updateLine(i, { description: e.target.value })}
-                  required
-                />
-                <Input
-                  className="col-span-3 text-end font-mono"
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={l.amount}
-                  onChange={(e) => updateLine(i, { amount: e.target.value })}
-                />
-                <Input
-                  className="col-span-2 text-end font-mono"
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  max="1"
-                  value={l.taxRate}
-                  onChange={(e) => updateLine(i, { taxRate: e.target.value })}
-                />
-                <div className="col-span-1 flex justify-center">
-                  <Button type="button" variant="ghost" size="sm" onClick={() => removeLine(i)} disabled={lines.length <= 1}>
+              <div key={i}>
+                {/* Desktop row — hidden on mobile */}
+                <div className="hidden sm:grid grid-cols-12 gap-2 items-center">
+                  <Input
+                    className="col-span-6"
+                    placeholder={t('invoice.description')}
+                    value={l.description}
+                    onChange={(e) => updateLine(i, { description: e.target.value })}
+                    required
+                  />
+                  <Input
+                    className="col-span-3 text-end font-mono"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={l.amount}
+                    onChange={(e) => updateLine(i, { amount: e.target.value })}
+                  />
+                  <Input
+                    className="col-span-2 text-end font-mono"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    max="1"
+                    value={l.taxRate}
+                    onChange={(e) => updateLine(i, { taxRate: e.target.value })}
+                  />
+                  <div className="col-span-1 flex justify-center">
+                    <Button type="button" variant="ghost" size="sm" onClick={() => removeLine(i)} disabled={lines.length <= 1}>
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </div>
+                {/* Mobile stacked card — hidden on sm+ */}
+                <div className="sm:hidden rounded-md border border-border/60 p-3 space-y-2">
+                  <div className="space-y-1">
+                    <Label className="text-[10px] text-muted-foreground">{t('invoice.description')}</Label>
+                    <Input
+                      placeholder={t('invoice.description')}
+                      value={l.description}
+                      onChange={(e) => updateLine(i, { description: e.target.value })}
+                      required
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <Label className="text-[10px] text-muted-foreground">{t('invoice.amount')}</Label>
+                      <Input
+                        className="text-end font-mono"
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={l.amount}
+                        onChange={(e) => updateLine(i, { amount: e.target.value })}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-[10px] text-muted-foreground">{t('invoice.taxRate')}</Label>
+                      <Input
+                        className="text-end font-mono"
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        max="1"
+                        value={l.taxRate}
+                        onChange={(e) => updateLine(i, { taxRate: e.target.value })}
+                      />
+                    </div>
+                  </div>
+                  <Button type="button" variant="ghost" size="sm" onClick={() => removeLine(i)} disabled={lines.length <= 1} className="w-full text-danger h-9">
                     <Trash2 className="h-3.5 w-3.5" />
+                    <span className="ms-1 text-xs">{t('common.cancel')}</span>
                   </Button>
                 </div>
               </div>

@@ -168,43 +168,89 @@ export function JournalPanel({ canCreate }: Props) {
               </div>
 
               <div className="space-y-2">
-                <div className="grid grid-cols-12 gap-2 text-xs font-medium text-muted-foreground px-1">
+                {/* Desktop header — hidden on mobile */}
+                <div className="hidden sm:grid grid-cols-12 gap-2 text-xs font-medium text-muted-foreground px-1">
                   <div className="col-span-6">{t('account.name')}</div>
                   <div className="col-span-2 text-end">{t('journal.debit')}</div>
                   <div className="col-span-2 text-end">{t('journal.credit')}</div>
                   <div className="col-span-2"></div>
                 </div>
                 {lines.map((l, i) => (
-                  <div key={i} className="grid grid-cols-12 gap-2 items-center">
-                    <div className="col-span-6">
-                      <Select value={l.accountId} onValueChange={(v) => updateLine(i, { accountId: v })}>
-                        <SelectTrigger><SelectValue placeholder={t('account.name')} /></SelectTrigger>
-                        <SelectContent>
-                          {accounts.map((a) => (
-                            <SelectItem key={a.id} value={a.id}>{accountLabel(a)}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                  <div key={i}>
+                    {/* Desktop row — hidden on mobile */}
+                    <div className="hidden sm:grid grid-cols-12 gap-2 items-center">
+                      <div className="col-span-6">
+                        <Select value={l.accountId} onValueChange={(v) => updateLine(i, { accountId: v })}>
+                          <SelectTrigger><SelectValue placeholder={t('account.name')} /></SelectTrigger>
+                          <SelectContent>
+                            {accounts.map((a) => (
+                              <SelectItem key={a.id} value={a.id}>{accountLabel(a)}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <Input
+                        className="col-span-2 text-end font-mono"
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={l.debit}
+                        onChange={(e) => updateLine(i, { debit: e.target.value, credit: e.target.value === '0' || Number(l.credit) === 0 ? l.credit : '0' })}
+                      />
+                      <Input
+                        className="col-span-2 text-end font-mono"
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={l.credit}
+                        onChange={(e) => updateLine(i, { credit: e.target.value, debit: e.target.value === '0' || Number(l.debit) === 0 ? l.debit : '0' })}
+                      />
+                      <div className="col-span-2 flex justify-center">
+                        <Button type="button" variant="ghost" size="sm" onClick={() => removeLine(i)} disabled={lines.length <= 2}>
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
                     </div>
-                    <Input
-                      className="col-span-2 text-end font-mono"
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={l.debit}
-                      onChange={(e) => updateLine(i, { debit: e.target.value, credit: e.target.value === '0' || Number(l.credit) === 0 ? l.credit : '0' })}
-                    />
-                    <Input
-                      className="col-span-2 text-end font-mono"
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={l.credit}
-                      onChange={(e) => updateLine(i, { credit: e.target.value, debit: e.target.value === '0' || Number(l.debit) === 0 ? l.debit : '0' })}
-                    />
-                    <div className="col-span-2 flex justify-center">
-                      <Button type="button" variant="ghost" size="sm" onClick={() => removeLine(i)} disabled={lines.length <= 2}>
+                    {/* Mobile stacked card — hidden on sm+ */}
+                    <div className="sm:hidden rounded-md border border-border/60 p-3 space-y-2">
+                      <div className="space-y-1">
+                        <Label className="text-[10px] text-muted-foreground">{t('account.name')}</Label>
+                        <Select value={l.accountId} onValueChange={(v) => updateLine(i, { accountId: v })}>
+                          <SelectTrigger><SelectValue placeholder={t('account.name')} /></SelectTrigger>
+                          <SelectContent>
+                            {accounts.map((a) => (
+                              <SelectItem key={a.id} value={a.id}>{accountLabel(a)}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="space-y-1">
+                          <Label className="text-[10px] text-muted-foreground">{t('journal.debit')}</Label>
+                          <Input
+                            className="text-end font-mono"
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            value={l.debit}
+                            onChange={(e) => updateLine(i, { debit: e.target.value, credit: e.target.value === '0' || Number(l.credit) === 0 ? l.credit : '0' })}
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-[10px] text-muted-foreground">{t('journal.credit')}</Label>
+                          <Input
+                            className="text-end font-mono"
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            value={l.credit}
+                            onChange={(e) => updateLine(i, { credit: e.target.value, debit: e.target.value === '0' || Number(l.debit) === 0 ? l.debit : '0' })}
+                          />
+                        </div>
+                      </div>
+                      <Button type="button" variant="ghost" size="sm" onClick={() => removeLine(i)} disabled={lines.length <= 2} className="w-full text-danger h-9">
                         <Trash2 className="h-3.5 w-3.5" />
+                        <span className="ms-1 text-xs">{t('common.cancel')}</span>
                       </Button>
                     </div>
                   </div>

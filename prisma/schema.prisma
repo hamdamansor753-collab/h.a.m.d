@@ -10,17 +10,17 @@ datasource db {
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model Account {
-  id            String        @id @default(uuid())
-  tenantId      String
-  code          String
-  nameKey       String
-  type          AccountType
-  parentId      String?
-  createdAt     DateTime      @default(now())
-  Account       Account?      @relation("AccountToAccount", fields: [parentId], references: [id])
-  other_Account Account[]     @relation("AccountToAccount")
-  Tenant        Tenant        @relation(fields: [tenantId], references: [id])
-  JournalLine   JournalLine[]
+  id           String        @id @default(uuid())
+  tenantId     String
+  code         String
+  nameKey      String
+  type         AccountType
+  parentId     String?
+  createdAt    DateTime      @default(now())
+  parent       Account?      @relation("AccountToAccount", fields: [parentId], references: [id])
+  children     Account[]     @relation("AccountToAccount")
+  tenant       Tenant        @relation(fields: [tenantId], references: [id])
+  journalLines JournalLine[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -34,8 +34,8 @@ model ActivityLog {
   type       String
   refId      String
   createdAt  DateTime @default(now())
-  Customer   Customer @relation(fields: [customerId], references: [id])
-  Tenant     Tenant   @relation(fields: [tenantId], references: [id])
+  customer   Customer @relation(fields: [customerId], references: [id])
+  tenant     Tenant   @relation(fields: [tenantId], references: [id])
 
   @@index([tenantId, customerId])
 }
@@ -48,9 +48,9 @@ model Appointment {
   scheduledAt DateTime
   note        String?
   status      AppointmentStatus @default(SCHEDULED)
-  Customer    Customer          @relation(fields: [customerId], references: [id])
-  Tenant      Tenant            @relation(fields: [tenantId], references: [id])
-  Reminder    Reminder[]
+  customer    Customer          @relation(fields: [customerId], references: [id])
+  tenant      Tenant            @relation(fields: [tenantId], references: [id])
+  reminders   Reminder[]
 
   @@index([tenantId, scheduledAt])
 }
@@ -60,8 +60,8 @@ model BOMComponent {
   bomId                String
   rawMaterialProductId String
   quantityPerUnit      Decimal
-  BillOfMaterials      BillOfMaterials @relation(fields: [bomId], references: [id], onDelete: Cascade)
-  Product              Product         @relation(fields: [rawMaterialProductId], references: [id])
+  billOfMaterials      BillOfMaterials @relation(fields: [bomId], references: [id], onDelete: Cascade)
+  rawMaterial          Product         @relation(fields: [rawMaterialProductId], references: [id])
 }
 
 model BillOfMaterials {
@@ -69,8 +69,8 @@ model BillOfMaterials {
   tenantId          String
   finishedProductId String
   laborCostPerUnit  Decimal        @default(0)
-  BOMComponent      BOMComponent[]
-  Product           Product        @relation(fields: [finishedProductId], references: [id])
+  components        BOMComponent[]
+  finishedProduct   Product        @relation(fields: [finishedProductId], references: [id])
 
   @@unique([tenantId, finishedProductId])
   @@index([tenantId])
@@ -83,59 +83,59 @@ model BrandSettings {
   accentColor       String   @default("#06b6d4")
   invoiceFooterText String?
   updatedAt         DateTime
-  Tenant            Tenant   @relation(fields: [tenantId], references: [id])
+  tenant            Tenant   @relation(fields: [tenantId], references: [id])
 }
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model Customer {
-  id          String        @id @default(uuid())
-  tenantId    String
-  name        String
-  phone       String?
-  email       String?
-  createdAt   DateTime      @default(now())
-  ActivityLog ActivityLog[]
-  Appointment Appointment[]
-  Tenant      Tenant        @relation(fields: [tenantId], references: [id])
-  Invoice     Invoice[]
+  id           String        @id @default(uuid())
+  tenantId     String
+  name         String
+  phone        String?
+  email        String?
+  createdAt    DateTime      @default(now())
+  activityLogs ActivityLog[]
+  appointments Appointment[]
+  tenant       Tenant        @relation(fields: [tenantId], references: [id])
+  invoices     Invoice[]
 
   @@index([tenantId])
 }
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model Employee {
-  id          String         @id @default(uuid())
-  tenantId    String
-  fullName    String
-  nationalId  String
-  hireDate    DateTime
-  baseSalary  Decimal
-  status      EmployeeStatus @default(ACTIVE)
-  createdAt   DateTime       @default(now())
-  Tenant      Tenant         @relation(fields: [tenantId], references: [id])
-  PayrollLine PayrollLine[]
+  id           String         @id @default(uuid())
+  tenantId     String
+  fullName     String
+  nationalId   String
+  hireDate     DateTime
+  baseSalary   Decimal
+  status       EmployeeStatus @default(ACTIVE)
+  createdAt    DateTime       @default(now())
+  tenant       Tenant         @relation(fields: [tenantId], references: [id])
+  payrollLines PayrollLine[]
 
   @@index([tenantId])
 }
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model Invoice {
-  id                                                    String         @id @default(uuid())
-  tenantId                                              String
-  number                                                String
-  customerName                                          String
-  date                                                  DateTime
-  status                                                InvoiceStatus  @default(DRAFT)
-  channel                                               InvoiceChannel @default(MANUAL)
-  journalEntryId                                        String?        @unique
-  voidJournalEntryId                                    String?        @unique
-  customerId                                            String?
-  createdAt                                             DateTime       @default(now())
-  Customer                                              Customer?      @relation(fields: [customerId], references: [id])
-  JournalEntry_Invoice_journalEntryIdToJournalEntry     JournalEntry?  @relation("Invoice_journalEntryIdToJournalEntry", fields: [journalEntryId], references: [id])
-  Tenant                                                Tenant         @relation(fields: [tenantId], references: [id])
-  JournalEntry_Invoice_voidJournalEntryIdToJournalEntry JournalEntry?  @relation("Invoice_voidJournalEntryIdToJournalEntry", fields: [voidJournalEntryId], references: [id])
-  InvoiceLine                                           InvoiceLine[]
+  id                 String         @id @default(uuid())
+  tenantId           String
+  number             String
+  customerName       String
+  date               DateTime
+  status             InvoiceStatus  @default(DRAFT)
+  channel            InvoiceChannel @default(MANUAL)
+  journalEntryId     String?        @unique
+  voidJournalEntryId String?        @unique
+  customerId         String?
+  createdAt          DateTime       @default(now())
+  customer           Customer?      @relation(fields: [customerId], references: [id])
+  journalEntry       JournalEntry?  @relation("Invoice_journalEntryIdToJournalEntry", fields: [journalEntryId], references: [id])
+  tenant             Tenant         @relation(fields: [tenantId], references: [id])
+  voidJournalEntry   JournalEntry?  @relation("Invoice_voidJournalEntryIdToJournalEntry", fields: [voidJournalEntryId], references: [id])
+  lines              InvoiceLine[]
 
   @@unique([tenantId, number])
   @@index([tenantId])
@@ -147,26 +147,26 @@ model InvoiceLine {
   description String
   amount      Decimal
   taxRate     Decimal @default(0)
-  Invoice     Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  invoice     Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
 }
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model JournalEntry {
-  id                                               String           @id @default(uuid())
-  tenantId                                         String
-  date                                             DateTime
-  description                                      String
-  sourceModule                                     String
-  sourceRefId                                      String
-  createdAt                                        DateTime         @default(now())
-  Invoice_Invoice_journalEntryIdToJournalEntry     Invoice?         @relation("Invoice_journalEntryIdToJournalEntry")
-  Invoice_Invoice_voidJournalEntryIdToJournalEntry Invoice?         @relation("Invoice_voidJournalEntryIdToJournalEntry")
-  Tenant                                           Tenant           @relation(fields: [tenantId], references: [id])
-  JournalLine                                      JournalLine[]
-  PayrollRun                                       PayrollRun?
-  ProductionOrder                                  ProductionOrder?
-  PurchaseOrder                                    PurchaseOrder?
-  StockMovement                                    StockMovement[]
+  id             String           @id @default(uuid())
+  tenantId       String
+  date           DateTime
+  description    String
+  sourceModule   String
+  sourceRefId    String
+  createdAt      DateTime         @default(now())
+  invoice        Invoice?         @relation("Invoice_journalEntryIdToJournalEntry")
+  voidInvoice    Invoice?         @relation("Invoice_voidJournalEntryIdToJournalEntry")
+  tenant         Tenant           @relation(fields: [tenantId], references: [id])
+  lines          JournalLine[]
+  payrollRun     PayrollRun?
+  productionOrder ProductionOrder?
+  purchaseOrder  PurchaseOrder?
+  stockMovements StockMovement[]
 
   @@index([tenantId, date])
 }
@@ -177,8 +177,8 @@ model JournalLine {
   accountId      String
   debit          Decimal      @default(0)
   credit         Decimal      @default(0)
-  Account        Account      @relation(fields: [accountId], references: [id])
-  JournalEntry   JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
+  account        Account      @relation(fields: [accountId], references: [id])
+  journalEntry   JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
 
   @@index([accountId])
   @@index([journalEntryId])
@@ -192,7 +192,7 @@ model PaymentRecord {
   recordedByUserId String
   periodExtendedTo DateTime
   createdAt        DateTime     @default(now())
-  Subscription     Subscription @relation(fields: [subscriptionId], references: [id])
+  subscription     Subscription @relation(fields: [subscriptionId], references: [id])
 }
 
 model PayrollLine {
@@ -204,8 +204,8 @@ model PayrollLine {
   employeeInsurance Decimal    @default(0)
   employerInsurance Decimal    @default(0)
   netPay            Decimal
-  Employee          Employee   @relation(fields: [employeeId], references: [id])
-  PayrollRun        PayrollRun @relation(fields: [payrollRunId], references: [id], onDelete: Cascade)
+  employee          Employee   @relation(fields: [employeeId], references: [id])
+  payrollRun        PayrollRun @relation(fields: [payrollRunId], references: [id], onDelete: Cascade)
 }
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
@@ -216,18 +216,18 @@ model PayrollRun {
   status         PayrollStatus @default(DRAFT)
   journalEntryId String?       @unique
   createdAt      DateTime      @default(now())
-  PayrollLine    PayrollLine[]
-  JournalEntry   JournalEntry? @relation(fields: [journalEntryId], references: [id])
-  Tenant         Tenant        @relation(fields: [tenantId], references: [id])
+  lines          PayrollLine[]
+  journalEntry   JournalEntry? @relation(fields: [journalEntryId], references: [id])
+  tenant         Tenant        @relation(fields: [tenantId], references: [id])
 
   @@unique([tenantId, period])
   @@index([tenantId])
 }
 
 model Permission {
-  id   String @id @default(uuid())
-  key  String @unique
-  Role Role[]
+  id    String @id @default(uuid())
+  key   String @unique
+  roles Role[]
 }
 
 model Plan {
@@ -237,7 +237,7 @@ model Plan {
   monthlyPrice        Decimal
   maxUsers            Int
   maxInvoicesPerMonth Int?
-  Subscription        Subscription[]
+  subscriptions       Subscription[]
 }
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
@@ -249,10 +249,10 @@ model Product {
   costPrice       Decimal           @default(0)
   sellPrice       Decimal           @default(0)
   createdAt       DateTime          @default(now())
-  BOMComponent    BOMComponent[]
-  BillOfMaterials BillOfMaterials[]
-  Tenant          Tenant            @relation(fields: [tenantId], references: [id])
-  StockLevel      StockLevel[]
+  bomComponents   BOMComponent[]
+  billOfMaterials BillOfMaterials[]
+  tenant          Tenant            @relation(fields: [tenantId], references: [id])
+  stockLevels     StockLevel[]
 
   @@unique([tenantId, sku])
   @@index([tenantId])
@@ -269,24 +269,24 @@ model ProductionOrder {
   totalLaborCost    Decimal?
   journalEntryId    String?               @unique
   createdAt         DateTime              @default(now())
-  JournalEntry      JournalEntry?         @relation(fields: [journalEntryId], references: [id])
+  journalEntry      JournalEntry?         @relation(fields: [journalEntryId], references: [id])
 
   @@index([tenantId])
 }
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model PurchaseOrder {
-  id                String              @id @default(uuid())
-  tenantId          String
-  number            String
-  supplierName      String
-  date              DateTime
-  status            PurchaseOrderStatus @default(DRAFT)
-  journalEntryId    String?             @unique
-  createdAt         DateTime            @default(now())
-  JournalEntry      JournalEntry?       @relation(fields: [journalEntryId], references: [id])
-  Tenant            Tenant              @relation(fields: [tenantId], references: [id])
-  PurchaseOrderLine PurchaseOrderLine[]
+  id             String              @id @default(uuid())
+  tenantId       String
+  number         String
+  supplierName   String
+  date           DateTime
+  status         PurchaseOrderStatus @default(DRAFT)
+  journalEntryId String?             @unique
+  createdAt      DateTime            @default(now())
+  journalEntry   JournalEntry?       @relation(fields: [journalEntryId], references: [id])
+  tenant         Tenant              @relation(fields: [tenantId], references: [id])
+  lines          PurchaseOrderLine[]
 
   @@unique([tenantId, number])
   @@index([tenantId])
@@ -299,7 +299,7 @@ model PurchaseOrderLine {
   quantity        Decimal
   unitCost        Decimal
   warehouseId     String
-  PurchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
 }
 
 model Reminder {
@@ -308,7 +308,7 @@ model Reminder {
   dueAt         DateTime
   sent          Boolean     @default(false)
   channel       String
-  Appointment   Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  appointment   Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
 
   @@index([dueAt, sent])
 }
@@ -316,8 +316,8 @@ model Reminder {
 model Role {
   id         String       @id @default(uuid())
   name       String       @unique
-  UserRole   UserRole[]
-  Permission Permission[]
+  userRoles  UserRole[]
+  permissions Permission[]
 }
 
 model SequenceCounter {
@@ -333,8 +333,8 @@ model StockLevel {
   productId   String
   warehouseId String
   quantity    Decimal   @default(0)
-  Product     Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
-  Warehouse   Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  product     Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  warehouse   Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
 
   @@unique([productId, warehouseId])
 }
@@ -352,8 +352,8 @@ model StockMovement {
   sourceRefId    String
   journalEntryId String?
   createdAt      DateTime          @default(now())
-  JournalEntry   JournalEntry?     @relation(fields: [journalEntryId], references: [id])
-  Tenant         Tenant            @relation(fields: [tenantId], references: [id])
+  journalEntry   JournalEntry?     @relation(fields: [journalEntryId], references: [id])
+  tenant         Tenant            @relation(fields: [tenantId], references: [id])
 
   @@index([tenantId, productId])
   @@index([tenantId, warehouseId])
@@ -367,34 +367,34 @@ model Subscription {
   currentPeriodEnd DateTime
   trialEndsAt      DateTime?
   createdAt        DateTime           @default(now())
-  PaymentRecord    PaymentRecord[]
-  Plan             Plan               @relation(fields: [planId], references: [id])
-  Tenant           Tenant             @relation(fields: [tenantId], references: [id])
+  paymentRecords   PaymentRecord[]
+  plan             Plan               @relation(fields: [planId], references: [id])
+  tenant           Tenant             @relation(fields: [tenantId], references: [id])
 }
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model Tenant {
-  id            String          @id @default(uuid())
-  name          String
-  defaultLocale String          @default("ar-EG")
-  country       String
-  createdAt     DateTime        @default(now())
-  businessType  String          @default("general")
-  Account       Account[]
-  ActivityLog   ActivityLog[]
-  Appointment   Appointment[]
-  BrandSettings BrandSettings?
-  Customer      Customer[]
-  Employee      Employee[]
-  Invoice       Invoice[]
-  JournalEntry  JournalEntry[]
-  PayrollRun    PayrollRun[]
-  Product       Product[]
-  PurchaseOrder PurchaseOrder[]
-  StockMovement StockMovement[]
-  Subscription  Subscription?
-  User          User[]
-  Warehouse     Warehouse[]
+  id             String          @id @default(uuid())
+  name           String
+  defaultLocale  String          @default("ar-EG")
+  country        String
+  createdAt      DateTime        @default(now())
+  businessType   String          @default("general")
+  accounts       Account[]
+  activityLogs   ActivityLog[]
+  appointments   Appointment[]
+  brandSettings  BrandSettings?
+  customers      Customer[]
+  employees      Employee[]
+  invoices       Invoice[]
+  journalEntries JournalEntry[]
+  payrollRuns    PayrollRun[]
+  products       Product[]
+  purchaseOrders PurchaseOrder[]
+  stockMovements StockMovement[]
+  subscription   Subscription?
+  users          User[]
+  warehouses     Warehouse[]
 }
 
 model TenantModuleOverride {
@@ -424,8 +424,8 @@ model User {
   passwordHash String
   locale       String     @default("ar-EG")
   createdAt    DateTime   @default(now())
-  Tenant       Tenant     @relation(fields: [tenantId], references: [id])
-  UserRole     UserRole[]
+  tenant       Tenant     @relation(fields: [tenantId], references: [id])
+  roles        UserRole[]
 
   @@unique([tenantId, email])
   @@index([tenantId])
@@ -434,21 +434,21 @@ model User {
 model UserRole {
   userId String
   roleId String
-  Role   Role   @relation(fields: [roleId], references: [id], onDelete: Cascade)
-  User   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role   Role   @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@id([userId, roleId])
 }
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model Warehouse {
-  id         String       @id @default(uuid())
-  tenantId   String
-  nameKey    String
-  isDefault  Boolean      @default(false)
-  createdAt  DateTime     @default(now())
-  StockLevel StockLevel[]
-  Tenant     Tenant       @relation(fields: [tenantId], references: [id])
+  id          String       @id @default(uuid())
+  tenantId    String
+  nameKey     String
+  isDefault   Boolean      @default(false)
+  createdAt   DateTime     @default(now())
+  stockLevels StockLevel[]
+  tenant      Tenant       @relation(fields: [tenantId], references: [id])
 
   @@index([tenantId])
 }

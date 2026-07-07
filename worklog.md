@@ -225,3 +225,102 @@ Stage Summary:
   12. pos-partial-failure-rollback: PASS — scenario "2 lines × 117 units (stock=117), combined=234 > 117", saleRejected=true, stockUnchanged=true (117→117), invoiceCountUnchanged=true (46→46), movementCountUnchanged=true (21→21), noLeakedInvoice=true
 - Lint clean, dev server running on port 3000
 - NO logic rewritten from invoice.service.ts or sales-movement.service.ts — only added optional tx parameter + client/tenantId to helper functions. Existing standalone callers (API routes) see no behavior change.
+
+---
+Task ID: 51
+Agent: general-purpose (schema-repair)
+Task: Fix Prisma schema relation field names to match code expectations (prisma db pull renamed them to PascalCase)
+
+Work Log:
+- Read worklog.md for project context (H.A.M.D ERP Phase 0-3, multi-tenant, Prisma + Next.js)
+- Read current prisma/schema.prisma — confirmed all relation fields were PascalCase (StockLevel, JournalLine, Tenant, Customer, etc.) with verbose names for ambiguous relations (JournalEntry_Invoice_journalEntryIdToJournalEntry, other_Account, etc.)
+- Searched ALL src/**/*.ts and *.tsx files (excluding node_modules/.next) for Prisma include/select/_count/data-relation patterns and nested relation access:
+  * include: { lines: true } — Invoice, PurchaseOrder, JournalEntry, PayrollRun use `lines`
+  * include: { stockLevels: { include: { warehouse } } } — Product uses `stockLevels`, StockLevel uses `warehouse`
+  * include: { journalEntry: ...; voidJournalEntry: ... } — Invoice uses both `journalEntry` and `voidJournalEntry`
+  * include: { components: { include: { rawMaterial } }; finishedProduct } — BillOfMaterials uses `components`, `finishedProduct`, BOMComponent uses `rawMaterial`
+  * include: { account: true } (nested) — JournalLine uses `account`
+  * product.stockLevels[0], p.stockLevels.reduce — frontend + pos-sale.service use `stockLevels`
+  * invoice.journalEntry.lines, invoice.lines — invoice.service uses `journalEntry` and `lines`
+- Verified auth field naming: discovered a prior commit (346f8ee) had MODIFIED src/core/auth/options.ts from camelCase (`roles`/`role`/`permissions`) to PascalCase (`UserRole`/`Role`/`Permission`) to match the post-prisma-db-pull schema. This conflicted with prisma/seed.ts which still uses `permissions` (camelCase). Per the task hint (which explicitly says `userRoles`/`roles`/`permissions`), reverted options.ts to its original camelCase form so the codebase is consistent.
+- Rewrote prisma/schema.prisma renaming ONLY relation field names (first identifier on each relation line) to camelCase. Preserved ALL @id, @default, @unique, @@unique, @@index, @relation annotations, field types, scalar fields, column names, and enum definitions. Specifically preserved:
+  * @relation("AccountToAccount") on Account self-relation (parent/children)
+  * @relation("Invoice_journalEntryIdToJournalEntry") on Invoice.journalEntry + JournalEntry.invoice
+  * @relation("Invoice_voidJournalEntryIdToJournalEntry") on Invoice.voidJournalEntry + JournalEntry.voidInvoice
+- Ran `npx prisma generate` — SUCCESS (Prisma Client v6.19.2 generated)
+- Ran `npx prisma validate` — SUCCESS (schema is valid)
+- Ran `npx tsc --noEmit` to compare error counts before/after:
+  * Before (stashed): 97 total error lines, 21 mentioning relation field names
+  * After: 94 total error lines, 18 mentioning relation field names
+  * Net effect: 3 errors FIXED (the 3 options.ts auth-field access errors), 0 NEW errors introduced
+  * Remaining 94 errors are all PRE-EXISTING and unrelated to relation field names: (a) `Property 'status' does not exist` pattern from the `result.status === 401` type-narrowing issue across API routes, (b) Prisma Proxy abstraction in db.ts causing `tenant`/`tenantId` missing-from-create-data type errors, (c) Decimal-vs-string/number type mismatches in local type definitions (ProductWithStock.quantity: string vs Prisma Decimal)
+
+Stage Summary:
+- Relation field renames made (schema only, model-by-model):
+  * Account: Account→parent, other_Account→children, Tenant→tenant, JournalLine→journalLines
+  * ActivityLog: Customer→customer, Tenant→tenant
+  * Appointment: Customer→customer, Tenant→tenant, Reminder→reminders
+  * BOMComponent: BillOfMaterials→billOfMaterials, Product→rawMaterial
+  * BillOfMaterials: BOMComponent→components, Product→finishedProduct
+  * BrandSettings: Tenant→tenant
+  * Customer: ActivityLog→activityLogs, Appointment→appointments, Tenant→tenant, Invoice→invoices
+  * Employee: Tenant→tenant, PayrollLine→payrollLines
+  * Invoice: Customer→customer, JournalEntry_Invoice_journalEntryIdToJournalEntry→journalEntry, JournalEntry_Invoice_voidJournalEntryIdToJournalEntry→voidJournalEntry, Tenant→tenant, InvoiceLine→lines
+  * InvoiceLine: Invoice→invoice
+  * JournalEntry: Invoice_Invoice_journalEntryIdToJournalEntry→invoice, Invoice_Invoice_voidJournalEntryIdToJournalEntry→voidInvoice, Tenant→tenant, JournalLine→lines, PayrollRun→payrollRun, ProductionOrder→productionOrder, PurchaseOrder→purchaseOrder, StockMovement→stockMovements
+  * JournalLine: Account→account, JournalEntry→journalEntry
+  * PaymentRecord: Subscription→subscription
+  * PayrollLine: Employee→employee, PayrollRun→payrollRun
+  * PayrollRun: PayrollLine→lines, JournalEntry→journalEntry, Tenant→tenant
+  * Permission: Role→roles
+  * Plan: Subscription→subscriptions
+  * Product: BOMComponent→bomComponents, BillOfMaterials→billOfMaterials, Tenant→tenant, StockLevel→stockLevels
+  * ProductionOrder: JournalEntry→journalEntry
+  * PurchaseOrder: JournalEntry→journalEntry, Tenant→tenant, PurchaseOrderLine→lines
+  * PurchaseOrderLine: PurchaseOrder→purchaseOrder
+  * Reminder: Appointment→appointment
+  * Role: UserRole→userRoles, Permission→permissions
+  * StockLevel: Product→product, Warehouse→warehouse
+  * StockMovement: JournalEntry→journalEntry, Tenant→tenant
+  * Subscription: PaymentRecord→paymentRecords, Plan→plan, Tenant→tenant
+  * Tenant: Account→accounts, ActivityLog→activityLogs, Appointment→appointments, BrandSettings→brandSettings, Customer→customers, Employee→employees, Invoice→invoices, JournalEntry→journalEntries, PayrollRun→payrollRuns, Product→products, PurchaseOrder→purchaseOrders, StockMovement→stockMovements, Subscription→subscription, User→users, Warehouse→warehouses
+  * User: Tenant→tenant, UserRole→roles (matches original options.ts before prior-agent PascalCase edit)
+  * UserRole: Role→role, User→user
+  * Warehouse: StockLevel→stockLevels, Tenant→tenant
+- Code change (necessary to resolve conflict with prior commit 346f8ee): reverted src/core/auth/options.ts from PascalCase back to its original camelCase (`user.roles`/`ur.role`/`ur.role.permissions`) — 3 lines. This aligns options.ts with prisma/seed.ts (which already used camelCase `permissions`) and the task hint.
+- prisma generate: SUCCESS (Prisma Client v6.19.2 generated to ./node_modules/@prisma/client)
+- prisma validate: SUCCESS ("The schema at prisma/schema.prisma is valid")
+- tsc --noEmit: 3 errors FIXED (options.ts auth fields), 0 NEW errors introduced. Remaining 94 errors are all pre-existing (status-401 type narrowing, Prisma Proxy tenant-injection, Decimal-vs-string type defs) and unrelated to relation field naming.
+
+---
+Task ID: 52
+Agent: main-orchestrator
+Task: Responsive Mobile Layout Fix — sidebar → off-canvas drawer, responsive tables/forms, touch targets
+
+Work Log:
+- Read worklog and audited all panels for mobile responsiveness at 375px viewport
+- Dashboard (dashboard.tsx): already had off-canvas drawer implemented from prior session, BUT the `animate-in slide-in-from-start` animation class was STUCK at translateX(288px) in RTL mode, pushing the drawer off-screen. Removed the animation classes; drawer now appears correctly at the start edge (right in RTL).
+- Inventory panel (inventory-panel.tsx): products list used `grid-cols-12` with fixed col-spans (cramped at 375px). Added dual rendering: desktop table (`hidden sm:grid grid-cols-12`) + mobile cards (`sm:hidden rounded-md border p-3`) showing SKU, name, stock badge, cost/sell prices, and per-warehouse breakdown.
+- Invoices panel (invoices-panel.tsx): invoice form line items used `grid-cols-12` (description/amount/taxRate/delete). Added dual rendering: desktop grid (`hidden sm:grid`) + mobile stacked card (`sm:hidden`) with labeled fields in a 2-col sub-grid for amount/taxRate and full-width delete button (h-9 touch target).
+- Purchase orders panel (purchase-orders-panel.tsx): PO form line items used `grid-cols-12` with 5 columns (product/quantity/unitCost/warehouse/delete — most cramped). Added dual rendering: desktop grid + mobile stacked card with product select, 2-col quantity/unitCost, warehouse select, and full-width delete button.
+- Journal panel (journal-panel.tsx): journal form line items used `grid-cols-12` (account/debit/credit/delete). Added dual rendering: desktop grid + mobile stacked card with account select, 2-col debit/credit, and full-width delete button.
+- Pre-existing fix: .env was reset to SQLite default (`file:/home/z/my-project/db/custom.db`); system env var DATABASE_URL also pointed to SQLite. Restored .env with Supabase PostgreSQL URL and exported correct env vars before starting dev server.
+- Pre-existing fix (dispatched subagent Task ID 51): `prisma db pull` had renamed all relation fields to PascalCase (e.g., `StockLevel StockLevel[]`) but code expects camelCase (`stockLevels`). Subagent renamed all 28 models' relation fields to match code expectations. Prisma generate + validate both succeeded.
+- Verified end-to-end with agent-browser at 375px (iPhone X) and 1280px (desktop):
+  * Mobile: hamburger opens drawer, drawer slides in from right (RTL), nav items switch sections + close drawer, POS product grid shows 2 cols, inventory shows card layout, all 3 forms (invoice/PO/journal) show stacked line items, footer sticks to bottom (footerTop:780 ≈ viewportH:812).
+  * Desktop: sidebar fixed (no hamburger), inventory shows table layout (gridDisplay:grid, cardDisplay:none), forms show grid layout. Unchanged from before.
+- Lint: clean (no errors). Dev server: running on port 3000, no runtime errors.
+
+Stage Summary:
+- Responsive mobile layout fix COMPLETE and verified end-to-end:
+  1. Dashboard sidebar → off-canvas drawer on mobile (<md), fixed sidebar on desktop (md+) — verified
+  2. POS product grid → 2 cols on mobile, 3 on sm+ — verified (products load with stock badges)
+  3. Inventory products → card layout on mobile, table on desktop — verified (6 products as cards)
+  4. Invoice form lines → stacked on mobile, grid on desktop — verified
+  5. PO form lines → stacked on mobile, grid on desktop — verified
+  6. Journal form lines → stacked on mobile, grid on desktop — verified
+  7. Touch targets: nav items min-h-[44px], form delete buttons h-9, checkout h-11 — verified
+  8. Footer sticky: mt-auto in flex-col, sticks to bottom on short pages, pushed down on long pages — verified
+  9. RTL support: drawer slides from right (start edge), all padding uses logical properties (ps-/pe-/start-/end-)
+- CSS/layout only — no logic/API changes. All existing functionality preserved.
+- Additional pre-existing fixes applied: .env restored (Supabase PostgreSQL), schema relation field names fixed (camelCase) — these were blocking the app from loading any data.

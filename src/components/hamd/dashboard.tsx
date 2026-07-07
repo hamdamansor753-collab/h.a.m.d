@@ -171,8 +171,8 @@ export function Dashboard({ user, locale, onLocaleChange, onLogout }: Props) {
               className="md:hidden fixed inset-0 bg-black/50 z-40"
               onClick={() => setMobileNavOpen(false)}
             />
-            {/* Drawer */}
-            <aside className="md:hidden fixed inset-y-0 start-0 w-72 max-w-[85vw] bg-sidebar text-sidebar-foreground border-e border-sidebar-border z-50 flex flex-col shadow-xl animate-in slide-in-from-start">
+            {/* Drawer — positioned at the inline-start edge (right in RTL, left in LTR) */}
+            <aside className="md:hidden fixed inset-y-0 start-0 end-auto w-72 max-w-[85vw] bg-sidebar text-sidebar-foreground border-e border-sidebar-border z-50 flex flex-col shadow-xl">
               {/* Drawer header */}
               <div className="flex items-center justify-between p-3 border-b border-sidebar-border">
                 <div className="flex items-center gap-2">

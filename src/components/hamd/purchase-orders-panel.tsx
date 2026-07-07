@@ -295,7 +295,8 @@ function PurchaseOrderForm({
 
           <div className="space-y-2">
             <Label>{t('purchaseOrder.lines')}</Label>
-            <div className="grid grid-cols-12 gap-2 text-xs font-medium text-muted-foreground px-1">
+            {/* Desktop header — hidden on mobile */}
+            <div className="hidden sm:grid grid-cols-12 gap-2 text-xs font-medium text-muted-foreground px-1">
               <div className="col-span-5">{t('purchaseOrder.product')}</div>
               <div className="col-span-2 text-end">{t('purchaseOrder.quantity')}</div>
               <div className="col-span-2 text-end">{t('purchaseOrder.unitCost')}</div>
@@ -303,46 +304,102 @@ function PurchaseOrderForm({
               <div className="col-span-1"></div>
             </div>
             {lines.map((l, i) => (
-              <div key={i} className="grid grid-cols-12 gap-2 items-center">
-                <div className="col-span-5">
-                  <Select value={l.productId} onValueChange={(v) => updateLine(i, { productId: v })}>
-                    <SelectTrigger><SelectValue placeholder={t('purchaseOrder.product')} /></SelectTrigger>
-                    <SelectContent>
-                      {products.map((p) => (
-                        <SelectItem key={p.id} value={p.id}>{productLabel(p)}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+              <div key={i}>
+                {/* Desktop row — hidden on mobile */}
+                <div className="hidden sm:grid grid-cols-12 gap-2 items-center">
+                  <div className="col-span-5">
+                    <Select value={l.productId} onValueChange={(v) => updateLine(i, { productId: v })}>
+                      <SelectTrigger><SelectValue placeholder={t('purchaseOrder.product')} /></SelectTrigger>
+                      <SelectContent>
+                        {products.map((p) => (
+                          <SelectItem key={p.id} value={p.id}>{productLabel(p)}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <Input
+                    className="col-span-2 text-end font-mono"
+                    type="number"
+                    step="1"
+                    min="0.01"
+                    value={l.quantity}
+                    onChange={(e) => updateLine(i, { quantity: e.target.value })}
+                  />
+                  <Input
+                    className="col-span-2 text-end font-mono"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={l.unitCost}
+                    onChange={(e) => updateLine(i, { unitCost: e.target.value })}
+                  />
+                  <div className="col-span-2">
+                    <Select value={l.warehouseId} onValueChange={(v) => updateLine(i, { warehouseId: v })}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {warehouses.map((w) => (
+                          <SelectItem key={w.id} value={w.id}>{warehouseLabel(w)}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="col-span-1 flex justify-center">
+                    <Button type="button" variant="ghost" size="sm" onClick={() => removeLine(i)} disabled={lines.length <= 1}>
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
                 </div>
-                <Input
-                  className="col-span-2 text-end font-mono"
-                  type="number"
-                  step="1"
-                  min="0.01"
-                  value={l.quantity}
-                  onChange={(e) => updateLine(i, { quantity: e.target.value })}
-                />
-                <Input
-                  className="col-span-2 text-end font-mono"
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={l.unitCost}
-                  onChange={(e) => updateLine(i, { unitCost: e.target.value })}
-                />
-                <div className="col-span-2">
-                  <Select value={l.warehouseId} onValueChange={(v) => updateLine(i, { warehouseId: v })}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {warehouses.map((w) => (
-                        <SelectItem key={w.id} value={w.id}>{warehouseLabel(w)}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="col-span-1 flex justify-center">
-                  <Button type="button" variant="ghost" size="sm" onClick={() => removeLine(i)} disabled={lines.length <= 1}>
+                {/* Mobile stacked card — hidden on sm+ */}
+                <div className="sm:hidden rounded-md border border-border/60 p-3 space-y-2">
+                  <div className="space-y-1">
+                    <Label className="text-[10px] text-muted-foreground">{t('purchaseOrder.product')}</Label>
+                    <Select value={l.productId} onValueChange={(v) => updateLine(i, { productId: v })}>
+                      <SelectTrigger><SelectValue placeholder={t('purchaseOrder.product')} /></SelectTrigger>
+                      <SelectContent>
+                        {products.map((p) => (
+                          <SelectItem key={p.id} value={p.id}>{productLabel(p)}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <Label className="text-[10px] text-muted-foreground">{t('purchaseOrder.quantity')}</Label>
+                      <Input
+                        className="text-end font-mono"
+                        type="number"
+                        step="1"
+                        min="0.01"
+                        value={l.quantity}
+                        onChange={(e) => updateLine(i, { quantity: e.target.value })}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-[10px] text-muted-foreground">{t('purchaseOrder.unitCost')}</Label>
+                      <Input
+                        className="text-end font-mono"
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={l.unitCost}
+                        onChange={(e) => updateLine(i, { unitCost: e.target.value })}
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[10px] text-muted-foreground">{t('purchaseOrder.warehouse')}</Label>
+                    <Select value={l.warehouseId} onValueChange={(v) => updateLine(i, { warehouseId: v })}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {warehouses.map((w) => (
+                          <SelectItem key={w.id} value={w.id}>{warehouseLabel(w)}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <Button type="button" variant="ghost" size="sm" onClick={() => removeLine(i)} disabled={lines.length <= 1} className="w-full text-danger h-9">
                     <Trash2 className="h-3.5 w-3.5" />
+                    <span className="ms-1 text-xs">{t('common.cancel')}</span>
                   </Button>
                 </div>
               </div>
